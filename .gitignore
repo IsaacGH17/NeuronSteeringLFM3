@@ -1,0 +1,19 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Model / experiment data (large, personal)
+data/
+!data/.gitkeep
+*.safetensors
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Environment
+.env
