@@ -8,9 +8,12 @@ Interactive GUI to inspect and steer activations of `LiquidAI/LFM3-1.7B` (PyTorc
 - `uv run pytest` — run tests (must pass without downloading LFM3 weights)
 - `uv run ruff check .` / `uv run ruff format .` — lint/format
 - Run anything: `uv run python -m ...` (never call system python; it has no torch)
-- Backend dev: `uv run uvicorn backend.app.main:app --reload` (port from app config)
+- Backend dev: `uv run uvicorn backend.app.main:app --reload` (host/port from `backend/app/core/settings.py`, env-overridable)
+- Frontend dev: `npm install` then `npm run dev` in `frontend/` (Vite proxies `/api` to `127.0.0.1:8000`)
+- Frontend build: `npm run build` in `frontend/` (typecheck + Vite; output served by FastAPI at `/` when `frontend/dist` exists)
+- Real-model integration: `LFM3_RUN_INTEGRATION=1 uv run pytest backend/tests/test_integration_lfm3.py` (weights cached in `~/.cache/huggingface`)
 
-## Environment (verified 2026-10-28)
+## Environment (verified 2026-10-29)
 
 - `.venv` in this repo: `torch==2.14.1+rocm7.2`, `triton-rocm==3.8.0` (from explicit `pytorch-rocm` uv index; see `pyproject.toml` `[tool.uv.sources]` — uvmapping transitive deps doesn't work, they must be declared as direct deps), `transformers==5.21.0`, FastAPI stack.
 - HIP 7.2 sees the RX 7600 (8.57GB, `torch.cuda.is_available() == True`, matmul verified). Physical VRAM 8GB; model weights 3.46GB BF16 → keep context/generation length bounded.
@@ -39,7 +42,14 @@ Interactive GUI to inspect and steer activations of `LiquidAI/LFM3-1.7B` (PyTorc
 - Capture only selected modules; never load full activation histories into RAM; don't persist activation tensors by default (PLAN §10/§13).
 - Anything displayed must come from real data of the loaded model; don't claim a feature works until tested (PLAN §18 final principle).
 
+## Phase 2 status (implemented and verified)
+
+- Backend: FastAPI app (`backend/app/main.py`), settings (`core/settings.py`), Pydantic schemas, `ModelManager` (lazy load, CPU/ROCm selection, diagnostics), architecture inspector, baseline chat generation, routes under `/api`.
+- Routes: `GET /api/health`, `GET /api/diagnostics`, `GET /api/model/status`, `POST /api/model/load`, `GET /api/model/architecture`, `GET /api/model/modules/{module_id}`, `POST /api/experiments/baseline`.
+- Frontend: React/Vite three-panel workspace (architecture tree + layer overview, module inspector, baseline generation) plus collapsible diagnostics; served by FastAPI from `frontend/dist`.
+- Real checkpoint is cached in `~/.cache/huggingface`; `LFM3_RUN_INTEGRATION=1` verifies 24 layers, 2048 hidden, correct layer types, and baseline generation on the RX 7600 (BF16, `cuda` API through ROCm).
+
 ## Still open
 
 - ROCm path notably emits benign stderr noise (`(null): No such file or directory`) at import.
-- Real model not yet downloaded (3.46GB, one-time, to `~/.cache/huggingface`); integration test with it pending.
+- First real generation includes ~5–6 s of ROCm/SDPA warmup; later tokens are faster. Keep generation bounded (8 GB physical VRAM).
