@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import torch
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from backend.app.schemas.api import (
+    ActivationResponse,
+    ActivationSummary,
     ArchitectureResponse,
     BaselineRequest,
     BaselineResponse,
@@ -14,6 +16,11 @@ from backend.app.schemas.api import (
     LoadModelRequest,
     ModelStatus,
     ModuleDetail,
+)
+from backend.app.services.activation_store import (
+    activation_store,
+    build_activation_response,
+    store_experiment,
 )
 from backend.app.services.architecture_inspector import build_architecture, describe_module
 from backend.app.services.generation import generate_baseline
@@ -86,7 +93,23 @@ def baseline(payload: BaselineRequest, request: Request) -> BaselineResponse:
     manager = get_manager(request)
     _require_loaded(manager)
     try:
-        return generate_baseline(manager, payload)
+        result = generate_baseline(manager, payload, capture_ids=payload.capture_module_ids)
+        if result.captures:
+            store_experiment(
+                experiment_id=result.response.id,
+                created_at=result.response.timestamp,
+                model_id=result.response.model_id,
+                revision=result.response.revision,
+                prompt=result.response.prompt,
+                system=result.response.system,
+                output=result.response.output,
+                prompt_token_count=result.response.prompt_tokens,
+                generated_tokens=result.response.generated_tokens,
+                tokens=result.tokens,
+                captures=result.captures,
+                warnings=result.response.warnings,
+            )
+        return result.response
     except ModelNotLoadedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except torch.cuda.OutOfMemoryError as exc:
@@ -94,5 +117,41 @@ def baseline(payload: BaselineRequest, request: Request) -> BaselineResponse:
             status_code=507,
             detail=f"GPU out of memory: {exc}. Reduce max_new_tokens or prompt length.",
         ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/experiments/{experiment_id}/activations", response_model=list[ActivationSummary])
+def experiment_activations(experiment_id: str) -> list[ActivationSummary]:
+    try:
+        return activation_store.list(experiment_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get(
+    "/experiments/{experiment_id}/activations/{module_id:path}",
+    response_model=ActivationResponse,
+)
+def experiment_activation(
+    experiment_id: str,
+    module_id: str,
+    feature: int | None = None,
+    position: int = -1,
+    max_positions: int = Query(default=128, ge=1, le=512),
+    max_features: int = Query(default=128, ge=1, le=512),
+) -> ActivationResponse:
+    try:
+        experiment = activation_store.get(experiment_id)
+        return build_activation_response(
+            experiment,
+            module_id,
+            feature=feature,
+            position=position,
+            max_positions=max_positions,
+            max_features=max_features,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

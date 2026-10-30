@@ -6,6 +6,7 @@ interface Props {
   selectedId: string | null;
   onSelect: (moduleId: string) => void;
   loading: boolean;
+  capturedIds: Set<string>;
 }
 
 type ViewMode = "tree" | "layers";
@@ -37,6 +38,7 @@ function TreeRow({
   expanded,
   toggle,
   onSelect,
+  capturedIds,
 }: {
   node: ModuleNode;
   depth: number;
@@ -45,6 +47,7 @@ function TreeRow({
   expanded: Set<string>;
   toggle: (id: string) => void;
   onSelect: (id: string) => void;
+  capturedIds: Set<string>;
 }) {
   const [hovered, setHovered] = useState(false);
   const isExpanded = expanded.has(node.id) || query !== "";
@@ -76,6 +79,11 @@ function TreeRow({
           {isExpanded ? "▾" : "▸"}
         </button>
         <span className={`dot ${node.supports_steering ? "steerable" : ""}`} title={node.steering_reason ?? ""} />
+        {capturedIds.has(node.id) && (
+          <span className="capture-indicator" title="Activations captured in the latest run">
+            cap
+          </span>
+        )}
         <span className="tree-name">{node.name}</span>
         <span className="tree-class">{node.class_name}</span>
         {node.layer_type && <span className={`badge layer-${node.layer_type}`}>{node.layer_type}</span>}
@@ -91,13 +99,14 @@ function TreeRow({
           expanded={expanded}
           toggle={toggle}
           onSelect={onSelect}
+          capturedIds={capturedIds}
         />
       ))}
     </div>
   );
 }
 
-export function ArchitectureExplorer({ architecture, selectedId, onSelect, loading }: Props) {
+export function ArchitectureExplorer({ architecture, selectedId, onSelect, loading, capturedIds }: Props) {
   const [view, setView] = useState<ViewMode>("tree");
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(
@@ -167,6 +176,7 @@ export function ArchitectureExplorer({ architecture, selectedId, onSelect, loadi
                 expanded={expanded}
                 toggle={toggle}
                 onSelect={onSelect}
+                capturedIds={capturedIds}
               />
             ) : (
               <div className="empty">No modules match “{query}”.</div>
@@ -183,7 +193,9 @@ export function ArchitectureExplorer({ architecture, selectedId, onSelect, loadi
           {architecture.layer_overview.map((block) => (
             <button
               key={block.module_id}
-              className={`layer-card ${selectedId === block.module_id ? "selected" : ""}`}
+              className={`layer-card ${selectedId === block.module_id ? "selected" : ""} ${
+                capturedIds.has(block.module_id) ? "captured" : ""
+              }`}
               onClick={() => onSelect(block.module_id)}
             >
               <div className="layer-card-top">

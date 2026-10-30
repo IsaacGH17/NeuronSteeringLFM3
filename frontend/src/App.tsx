@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ApiError,
+  getActivation,
   getArchitecture,
   getDiagnostics,
   getModule,
@@ -13,6 +14,7 @@ import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
 import { GenerationPanel } from "./components/GenerationPanel";
 import { ModuleInspector } from "./components/ModuleInspector";
 import type {
+  ActivationResponse,
   Architecture,
   BaselineResponse,
   Diagnostics,
@@ -51,7 +53,12 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [baseline, setBaseline] = useState<BaselineResponse | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [activation, setActivation] = useState<ActivationResponse | null>(null);
+  const [activationLoading, setActivationLoading] = useState(false);
+  const [activationError, setActivationError] = useState<string | null>(null);
+  const [capturedIds, setCapturedIds] = useState<Set<string>>(() => new Set());
   const selectionRequest = useRef(0);
+  const activationRequest = useRef(0);
 
   const refreshStatus = useCallback(async () => {
     const next = await getStatus();
@@ -114,11 +121,30 @@ export default function App() {
     }
   };
 
+  const loadActivation = useCallback(
+    async (experimentId: string, moduleId: string, query: { feature?: number; position?: number }) => {
+      const requestId = ++activationRequest.current;
+      setActivationLoading(true);
+      setActivationError(null);
+      try {
+        const next = await getActivation(experimentId, moduleId, query);
+        if (requestId === activationRequest.current) setActivation(next);
+      } catch (error) {
+        if (requestId === activationRequest.current) setActivationError(errorMessage(error));
+      } finally {
+        if (requestId === activationRequest.current) setActivationLoading(false);
+      }
+    },
+    [],
+  );
+
   const handleSelect = async (moduleId: string) => {
     setSelectedId(moduleId);
     setDetail(null);
     setDetailError(null);
     setDetailLoading(true);
+    setActivation((current) => (current && current.module_id === moduleId ? current : null));
+    setActivationError(null);
     const requestId = ++selectionRequest.current;
     try {
       const next = await getModule(moduleId);
@@ -134,11 +160,20 @@ export default function App() {
     prompt: string,
     system: string | null,
     settings: GenerationSettings,
+    captureModuleIds: string[],
   ) => {
     setRunning(true);
     setGenerationError(null);
     try {
-      setBaseline(await runBaseline(prompt, system, settings));
+      const run = await runBaseline(prompt, system, settings, captureModuleIds);
+      setBaseline(run);
+      setCapturedIds(new Set(run.captured_modules));
+      if (run.captured_modules.length > 0) {
+        await loadActivation(run.id, run.captured_modules[0], {});
+      } else {
+        setActivation(null);
+        setActivationError(null);
+      }
       await refreshDiagnostics();
     } catch (error) {
       setGenerationError(errorMessage(error));
@@ -175,6 +210,7 @@ export default function App() {
           selectedId={selectedId}
           onSelect={handleSelect}
           loading={architectureLoading}
+          capturedIds={capturedIds}
         />
         <ModuleInspector
           detail={detail}
@@ -182,12 +218,21 @@ export default function App() {
           loading={detailLoading}
           error={detailError}
           onSelect={handleSelect}
+          activation={activation}
+          activationLoading={activationLoading}
+          activationError={activationError}
+          onActivationQuery={(query) => {
+            if (activation) {
+              void loadActivation(activation.experiment_id, activation.module_id, query);
+            }
+          }}
         />
         <GenerationPanel
           disabled={!status.loaded}
           running={running}
           result={baseline}
           error={generationError}
+          captureModuleId={selectedId && detail?.supports_steering ? selectedId : null}
           onRun={handleRunBaseline}
         />
       </main>

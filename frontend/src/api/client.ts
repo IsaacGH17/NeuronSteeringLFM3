@@ -1,4 +1,6 @@
 import type {
+  ActivationResponse,
+  ActivationSummary,
   Architecture,
   BaselineResponse,
   Diagnostics,
@@ -68,9 +70,35 @@ export function runBaseline(
   prompt: string,
   system: string | null,
   settings: GenerationSettings,
+  captureModuleIds: string[] = [],
 ): Promise<BaselineResponse> {
   return request<BaselineResponse>("/experiments/baseline", {
     method: "POST",
-    body: JSON.stringify({ prompt, system, settings }),
+    body: JSON.stringify({ prompt, system, settings, capture_module_ids: captureModuleIds }),
   });
+}
+
+export function listActivations(experimentId: string): Promise<ActivationSummary[]> {
+  return request<ActivationSummary[]>(`/experiments/${experimentId}/activations`);
+}
+
+export interface ActivationQuery {
+  feature?: number;
+  position?: number;
+  maxPositions?: number;
+  maxFeatures?: number;
+}
+
+export function getActivation(
+  experimentId: string,
+  moduleId: string,
+  query: ActivationQuery = {},
+): Promise<ActivationResponse> {
+  const params = new URLSearchParams();
+  if (query.feature !== undefined) params.set("feature", String(query.feature));
+  if (query.position !== undefined) params.set("position", String(query.position));
+  if (query.maxPositions !== undefined) params.set("max_positions", String(query.maxPositions));
+  if (query.maxFeatures !== undefined) params.set("max_features", String(query.maxFeatures));
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  return request<ActivationResponse>(`/experiments/${experimentId}/activations/${moduleId}${suffix}`);
 }

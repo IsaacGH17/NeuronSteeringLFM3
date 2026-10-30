@@ -128,6 +128,7 @@ class BaselineRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=32_000)
     system: str | None = Field(default=None, max_length=8_000)
     settings: GenerationSettings = Field(default_factory=GenerationSettings)
+    capture_module_ids: list[str] = Field(default_factory=list, max_length=8)
 
     @field_validator("prompt")
     @classmethod
@@ -152,6 +153,69 @@ class BaselineResponse(BaseModel):
     duration_ms: float
     tokens_per_second: float | None = None
     settings: GenerationSettings
+    captured_modules: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class TokenInfo(BaseModel):
+    index: int
+    token_id: int
+    text: str
+    phase: Literal["prompt", "generated"]
+
+
+class ActivationSummary(BaseModel):
+    module_id: str
+    shape: list[int]
+    dtype: str
+
+
+class HeatmapData(BaseModel):
+    positions: list[int]
+    features: list[int]
+    values: list[list[float]]
+    sampling: str
+
+
+class HistogramData(BaseModel):
+    bin_edges: list[float]
+    counts: list[int]
+
+
+class ActivationStats(BaseModel):
+    minimum: float
+    maximum: float
+    mean: float
+    std: float
+    abs_mean: float
+
+
+class TopDimension(BaseModel):
+    index: int
+    value: float
+    abs_value: float
+
+
+class FeatureSeries(BaseModel):
+    feature: int
+    positions: list[int]
+    values: list[float]
+
+
+class ActivationResponse(BaseModel):
+    experiment_id: str
+    module_id: str
+    shape: list[int]
+    dtype: str
+    aggregation: str
+    prompt_token_count: int
+    tokens: list[TokenInfo]
+    heatmap: HeatmapData
+    histogram: HistogramData
+    stats: ActivationStats
+    position: int
+    top_dimensions: list[TopDimension]
+    feature_series: FeatureSeries
     warnings: list[str] = Field(default_factory=list)
 
 

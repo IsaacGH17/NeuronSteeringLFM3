@@ -55,8 +55,24 @@ def test_real_baseline_generation(real_manager: ModelManager):
             prompt="Reply with exactly the word: ready",
             settings=GenerationSettings(max_new_tokens=8),
         ),
-    )
+    ).response
     assert response.prompt_tokens > 0
     assert response.generated_tokens > 0
     assert response.output.strip() != ""
     assert response.device == real_manager.device
+
+
+def test_real_activation_capture(real_manager: ModelManager):
+    result = generate_baseline(
+        real_manager,
+        BaselineRequest(
+            prompt="Name one color.",
+            settings=GenerationSettings(max_new_tokens=4),
+        ),
+        capture_ids=["model.layers.2.feed_forward"],
+    )
+    tensor = result.captures["model.layers.2.feed_forward"]
+    assert tensor.shape[1] == 2048
+    assert tensor.shape[0] == len(result.tokens)
+    assert tensor.shape[0] > 0
+    assert result.response.captured_modules == ["model.layers.2.feed_forward"]

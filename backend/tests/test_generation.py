@@ -20,7 +20,7 @@ def test_baseline_installs_no_hooks(manager):
     response = generate_baseline(
         manager,
         BaselineRequest(prompt="Hello", settings=GenerationSettings(max_new_tokens=3)),
-    )
+    ).response
     after = _hook_snapshot(manager.model)
     assert response.generated_tokens == 3
     assert before == after
@@ -39,8 +39,8 @@ def test_baseline_does_not_change_weights(manager):
 
 def test_greedy_is_deterministic(manager):
     request = BaselineRequest(prompt="Determinism", settings=GenerationSettings(max_new_tokens=5))
-    first = generate_baseline(manager, request)
-    second = generate_baseline(manager, request)
+    first = generate_baseline(manager, request).response
+    second = generate_baseline(manager, request).response
     assert first.output == second.output
 
 
@@ -52,6 +52,6 @@ def test_system_prompt_reaches_template(manager):
             system="Be terse",
             settings=GenerationSettings(max_new_tokens=1),
         ),
-    )
+    ).response
     assert response.system == "Be terse"
     assert response.prompt_tokens > 0

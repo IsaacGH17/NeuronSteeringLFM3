@@ -6,12 +6,25 @@ interface Props {
   running: boolean;
   result: BaselineResponse | null;
   error: string | null;
-  onRun: (prompt: string, system: string | null, settings: GenerationSettings) => void;
+  captureModuleId: string | null;
+  onRun: (
+    prompt: string,
+    system: string | null,
+    settings: GenerationSettings,
+    captureModuleIds: string[],
+  ) => void;
 }
 
 const DEFAULT_PROMPT = "Explain what a transformer activation is in two sentences.";
 
-export function GenerationPanel({ disabled, running, result, error, onRun }: Props) {
+export function GenerationPanel({
+  disabled,
+  running,
+  result,
+  error,
+  captureModuleId,
+  onRun,
+}: Props) {
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [system, setSystem] = useState("");
   const [maxNewTokens, setMaxNewTokens] = useState(128);
@@ -19,17 +32,23 @@ export function GenerationPanel({ disabled, running, result, error, onRun }: Pro
   const [topP, setTopP] = useState(1);
   const [seed, setSeed] = useState("");
   const [enableThinking, setEnableThinking] = useState(false);
+  const [captureEnabled, setCaptureEnabled] = useState(false);
 
   const submit = () => {
     if (!prompt.trim() || disabled || running) return;
     const parsedSeed = seed.trim() === "" ? null : Number(seed);
-    onRun(prompt, system.trim() === "" ? null : system, {
-      max_new_tokens: Math.max(1, Math.min(4096, Math.round(maxNewTokens))),
-      temperature,
-      top_p: topP,
-      seed: parsedSeed !== null && Number.isFinite(parsedSeed) ? parsedSeed : null,
-      enable_thinking: enableThinking,
-    });
+    onRun(
+      prompt,
+      system.trim() === "" ? null : system,
+      {
+        max_new_tokens: Math.max(1, Math.min(4096, Math.round(maxNewTokens))),
+        temperature,
+        top_p: topP,
+        seed: parsedSeed !== null && Number.isFinite(parsedSeed) ? parsedSeed : null,
+        enable_thinking: enableThinking,
+      },
+      captureEnabled && captureModuleId ? [captureModuleId] : [],
+    );
   };
 
   return (
@@ -107,6 +126,18 @@ export function GenerationPanel({ disabled, running, result, error, onRun }: Pro
             onChange={(event) => setEnableThinking(event.target.checked)}
           />
           <span>Enable thinking (off by default)</span>
+        </label>
+
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={captureEnabled}
+            disabled={!captureModuleId}
+            onChange={(event) => setCaptureEnabled(event.target.checked)}
+          />
+          <span>
+            Capture activations{captureModuleId ? ` for ${captureModuleId}` : " (select a steerable module)"}
+          </span>
         </label>
 
         <button className="primary" onClick={submit} disabled={disabled || running || !prompt.trim()}>

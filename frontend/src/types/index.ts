@@ -114,5 +114,68 @@ export interface BaselineResponse {
   duration_ms: number;
   tokens_per_second: number | null;
   settings: GenerationSettings;
+  captured_modules: string[];
+  warnings: string[];
+}
+
+export interface TokenInfo {
+  index: number;
+  token_id: number;
+  text: string;
+  phase: "prompt" | "generated";
+}
+
+export interface ActivationSummary {
+  module_id: string;
+  shape: number[];
+  dtype: string;
+}
+
+export interface HeatmapData {
+  positions: number[];
+  features: number[];
+  values: number[][];
+  sampling: string;
+}
+
+export interface HistogramData {
+  bin_edges: number[];
+  counts: number[];
+}
+
+export interface ActivationStats {
+  minimum: number;
+  maximum: number;
+  mean: number;
+  std: number;
+  abs_mean: number;
+}
+
+export interface TopDimension {
+  index: number;
+  value: number;
+  abs_value: number;
+}
+
+export interface FeatureSeries {
+  feature: number;
+  positions: number[];
+  values: number[];
+}
+
+export interface ActivationResponse {
+  experiment_id: string;
+  module_id: string;
+  shape: number[];
+  dtype: string;
+  aggregation: string;
+  prompt_token_count: number;
+  tokens: TokenInfo[];
+  heatmap: HeatmapData;
+  histogram: HistogramData;
+  stats: ActivationStats;
+  position: number;
+  top_dimensions: TopDimension[];
+  feature_series: FeatureSeries;
   warnings: string[];
 }

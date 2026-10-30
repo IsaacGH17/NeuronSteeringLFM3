@@ -1,4 +1,5 @@
-import type { ModuleDetail } from "../types";
+import type { ActivationResponse, ModuleDetail } from "../types";
+import { ActivationView } from "./ActivationView";
 
 interface Props {
   detail: ModuleDetail | null;
@@ -6,13 +7,27 @@ interface Props {
   loading: boolean;
   error: string | null;
   onSelect: (moduleId: string) => void;
+  activation: ActivationResponse | null;
+  activationLoading: boolean;
+  activationError: string | null;
+  onActivationQuery: (query: { feature?: number; position?: number }) => void;
 }
 
 function formatNumber(value: number): string {
   return value.toLocaleString();
 }
 
-export function ModuleInspector({ detail, selectedId, loading, error, onSelect }: Props) {
+export function ModuleInspector({
+  detail,
+  selectedId,
+  loading,
+  error,
+  onSelect,
+  activation,
+  activationLoading,
+  activationError,
+  onActivationQuery,
+}: Props) {
   return (
     <section className="panel inspector">
       <header className="panel-header">
@@ -64,6 +79,14 @@ export function ModuleInspector({ detail, selectedId, loading, error, onSelect }
 
           <div className={`callout ${detail.supports_steering ? "ok" : "muted"}`}>{detail.steering_reason}</div>
 
+          <h4>Activations</h4>
+          <ActivationView
+            activation={activation}
+            loading={activationLoading}
+            error={activationError}
+            onQuery={onActivationQuery}
+          />
+
           <h4>Direct parameters</h4>
           {detail.parameters.length === 0 ? (
             <p className="subtle">No parameters registered directly on this module.</p>
@@ -103,13 +126,6 @@ export function ModuleInspector({ detail, selectedId, loading, error, onSelect }
             </>
           )}
 
-          <div className="placeholder-card">
-            <strong>Activation visualization</strong>
-            <p>
-              Phase 2 exposes the real module tree, shapes, and baseline generation. Activation heatmaps,
-              feature selection, and steering controls are implemented in the next phase.
-            </p>
-          </div>
         </div>
       )}
     </section>

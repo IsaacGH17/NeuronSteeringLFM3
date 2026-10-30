@@ -8,13 +8,56 @@ from __future__ import annotations
 
 import time
 import uuid
+from contextlib import nullcontext
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 import torch
 
-from backend.app.schemas.api import BaselineRequest, BaselineResponse, GenerationSettings
+from backend.app.schemas.api import BaselineRequest, BaselineResponse, GenerationSettings, TokenInfo
+from backend.app.services.activation_capture import (
+    MAX_CAPTURE_POSITIONS,
+    capture_modules,
+    finalize_captures,
+    validate_capture_module_ids,
+)
 from backend.app.services.model_loader import ModelManager
+
+
+@dataclass
+class GenerationResult:
+    response: BaselineResponse
+    tokens: list[TokenInfo] = field(default_factory=list)
+    captures: dict[str, torch.Tensor] = field(default_factory=dict)
+
+
+def _decode_token(tokenizer: Any, token_id: int) -> str:
+    try:
+        return tokenizer.decode([token_id], skip_special_tokens=False)
+    except TypeError:
+        return tokenizer.decode([token_id])
+
+
+def _build_tokens(tokenizer: Any, prompt_ids: list[int], generated_ids: list[int]) -> list[TokenInfo]:
+    tokens: list[TokenInfo] = []
+    for index, token_id in enumerate(prompt_ids):
+        tokens.append(
+            TokenInfo(
+                index=index, token_id=int(token_id), text=_decode_token(tokenizer, token_id), phase="prompt"
+            )
+        )
+    offset = len(prompt_ids)
+    for index, token_id in enumerate(generated_ids):
+        tokens.append(
+            TokenInfo(
+                index=offset + index,
+                token_id=int(token_id),
+                text=_decode_token(tokenizer, token_id),
+                phase="generated",
+            )
+        )
+    return tokens
 
 
 def _apply_chat_template(
@@ -67,11 +110,17 @@ def _generation_kwargs(
     return kwargs
 
 
-def generate_baseline(manager: ModelManager, request: BaselineRequest) -> BaselineResponse:
+def generate_baseline(
+    manager: ModelManager,
+    request: BaselineRequest,
+    *,
+    capture_ids: list[str] | None = None,
+) -> GenerationResult:
     model = manager.model
     tokenizer = manager.tokenizer
     device = manager.device
     settings = request.settings
+    capture_ids = validate_capture_module_ids(model, capture_ids or [])
 
     warnings: list[str] = []
     max_new_tokens = min(settings.max_new_tokens, manager.settings.max_new_tokens)
@@ -86,6 +135,11 @@ def generate_baseline(manager: ModelManager, request: BaselineRequest) -> Baseli
     templated = _apply_chat_template(tokenizer, request.prompt, request.system, settings.enable_thinking)
     inputs = _tokenize(tokenizer, templated, device)
     prompt_tokens = int(inputs["input_ids"].shape[1])
+    if capture_ids and prompt_tokens + max_new_tokens > MAX_CAPTURE_POSITIONS:
+        raise ValueError(
+            f"Activation capture is limited to {MAX_CAPTURE_POSITIONS} positions; this run needs up to "
+            f"{prompt_tokens + max_new_tokens}. Shorten the prompt or max_new_tokens."
+        )
     kwargs = _generation_kwargs(model, tokenizer, settings, max_new_tokens)
 
     if settings.seed is not None:
@@ -93,8 +147,13 @@ def generate_baseline(manager: ModelManager, request: BaselineRequest) -> Baseli
         if device.startswith("cuda"):
             torch.cuda.manual_seed_all(settings.seed)
 
+    capture_context = capture_modules(model, capture_ids) if capture_ids else nullcontext(({}, []))
     start = time.perf_counter()
-    with manager.inference_lock, torch.inference_mode():
+    with (
+        manager.inference_lock,
+        torch.inference_mode(),
+        capture_context as (capture_chunks, capture_warnings),
+    ):
         output = model.generate(**inputs, **kwargs)
     duration_ms = (time.perf_counter() - start) * 1000.0
 
@@ -103,11 +162,26 @@ def generate_baseline(manager: ModelManager, request: BaselineRequest) -> Baseli
     text = tokenizer.decode(generated_ids, skip_special_tokens=True)
     tokens_per_second = generated_tokens / (duration_ms / 1000.0) if duration_ms > 0 else None
 
-    return BaselineResponse(
+    captures, finalize_warnings = finalize_captures(capture_chunks)
+    captured_token_count = prompt_tokens + generated_tokens
+    if captures:
+        captured_token_count = min(tensor.shape[0] for tensor in captures.values())
+        if captured_token_count < prompt_tokens + generated_tokens:
+            warnings.append(
+                f"Activations cover the {captured_token_count} positions that were forwarded; "
+                "the final generated token has no activation."
+            )
+    token_infos = _build_tokens(
+        tokenizer,
+        inputs["input_ids"][0].tolist(),
+        generated_ids.tolist()[: max(0, captured_token_count - prompt_tokens)],
+    )
+    status = manager.status()
+    response = BaselineResponse(
         id=uuid.uuid4().hex,
         timestamp=datetime.now(UTC),
-        model_id=manager.status().model_id,
-        revision=manager.status().revision,
+        model_id=status.model_id,
+        revision=status.revision,
         device=device,
         prompt=request.prompt,
         system=request.system,
@@ -117,5 +191,7 @@ def generate_baseline(manager: ModelManager, request: BaselineRequest) -> Baseli
         duration_ms=round(duration_ms, 2),
         tokens_per_second=round(tokens_per_second, 2) if tokens_per_second is not None else None,
         settings=settings,
-        warnings=warnings,
+        captured_modules=list(captures),
+        warnings=warnings + capture_warnings + finalize_warnings,
     )
+    return GenerationResult(response=response, tokens=token_infos, captures=captures)

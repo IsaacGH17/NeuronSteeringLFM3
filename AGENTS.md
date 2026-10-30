@@ -49,7 +49,15 @@ Interactive GUI to inspect and steer activations of `LiquidAI/LFM3-1.7B` (PyTorc
 - Frontend: React/Vite three-panel workspace (architecture tree + layer overview, module inspector, baseline generation) plus collapsible diagnostics; served by FastAPI from `frontend/dist`.
 - Real checkpoint is cached in `~/.cache/huggingface`; `LFM3_RUN_INTEGRATION=1` verifies 24 layers, 2048 hidden, correct layer types, and baseline generation on the RX 7600 (BF16, `cuda` API through ROCm).
 
+## Phase 3 status (implemented and verified)
+
+- Baseline requests accept `capture_module_ids` (max 8, only hidden-state modules). Hooks are installed around `generate` and removed in `finally`; tensors are detached and copied to CPU float32.
+- Captured activations live only in an ephemeral in-memory store (8 experiments / 256 MB, oldest evicted). Routes: `GET /api/experiments/{id}/activations` and `GET /api/experiments/{id}/activations/{module_id}?feature=&position=&max_positions=&max_features=`.
+- Activation payloads include token alignment (prompt/generated), evenly sampled heatmap, 40-bin histogram, stats, top-20 dimensions, and a feature series. The final generated token usually has no activation because it is never forwarded.
+- Frontend center panel shows the real tensor: token strip, canvas heatmap with tooltip/legend, clickable feature chart, distribution, top dimensions, and captured-module indicators in the architecture explorer.
+
 ## Still open
 
 - ROCm path notably emits benign stderr noise (`(null): No such file or directory`) at import.
 - First real generation includes ~5–6 s of ROCm/SDPA warmup; later tokens are faster. Keep generation bounded (8 GB physical VRAM).
+- Activation tensors are not persisted; reopening old experiments after a backend restart is Phase 5 work.
