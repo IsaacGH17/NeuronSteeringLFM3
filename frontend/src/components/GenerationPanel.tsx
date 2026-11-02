@@ -1,29 +1,42 @@
 import { useState } from "react";
-import type { BaselineResponse, GenerationSettings } from "../types";
+import type { BaselineResponse, GenerationSettings, SteeringResponse, SteeringSpec } from "../types";
 
 interface Props {
   disabled: boolean;
   running: boolean;
   result: BaselineResponse | null;
+  pair: SteeringResponse | null;
   error: string | null;
   captureModuleId: string | null;
+  hiddenSize: number | null;
   onRun: (
     prompt: string,
     system: string | null,
     settings: GenerationSettings,
     captureModuleIds: string[],
   ) => void;
+  onRunSteered: (
+    prompt: string,
+    system: string | null,
+    settings: GenerationSettings,
+    steering: SteeringSpec,
+    captureModuleIds: string[],
+  ) => void;
 }
 
 const DEFAULT_PROMPT = "Explain what a transformer activation is in two sentences.";
+const STRENGTH_LIMIT = 49.5;
 
 export function GenerationPanel({
   disabled,
   running,
   result,
+  pair,
   error,
   captureModuleId,
+  hiddenSize,
   onRun,
+  onRunSteered,
 }: Props) {
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [system, setSystem] = useState("");
@@ -33,30 +46,61 @@ export function GenerationPanel({
   const [seed, setSeed] = useState("");
   const [enableThinking, setEnableThinking] = useState(false);
   const [captureEnabled, setCaptureEnabled] = useState(false);
+  const [featureIndex, setFeatureIndex] = useState(0);
+  const [strength, setStrength] = useState(0);
+
+  const buildSettings = (): GenerationSettings => ({
+    max_new_tokens: Math.max(1, Math.min(4096, Math.round(maxNewTokens))),
+    temperature,
+    top_p: topP,
+    seed: Number.isFinite(Number(seed)) && seed.trim() !== "" ? Number(seed) : null,
+    enable_thinking: enableThinking,
+  });
+
+  const sharedArgs = () => ({
+    promptText: prompt,
+    systemText: system.trim() === "" ? null : system,
+    settings: buildSettings(),
+    captures: captureEnabled && captureModuleId ? [captureModuleId] : [],
+  });
 
   const submit = () => {
     if (!prompt.trim() || disabled || running) return;
-    const parsedSeed = seed.trim() === "" ? null : Number(seed);
-    onRun(
-      prompt,
-      system.trim() === "" ? null : system,
+    const { promptText, systemText, settings, captures } = sharedArgs();
+    onRun(promptText, systemText, settings, captures);
+  };
+
+  const submitSteered = () => {
+    if (!prompt.trim() || disabled || running) return;
+    if (!captureModuleId) return;
+    const clampedFeature = Math.max(
+      0,
+      Math.min(hiddenSize !== null ? hiddenSize - 1 : Number.MAX_SAFE_INTEGER, Math.round(featureIndex)),
+    );
+    const clampedStrength = Math.max(-STRENGTH_LIMIT, Math.min(STRENGTH_LIMIT, strength));
+    const { promptText, systemText, settings, captures } = sharedArgs();
+    onRunSteered(
+      promptText,
+      systemText,
+      settings,
       {
-        max_new_tokens: Math.max(1, Math.min(4096, Math.round(maxNewTokens))),
-        temperature,
-        top_p: topP,
-        seed: parsedSeed !== null && Number.isFinite(parsedSeed) ? parsedSeed : null,
-        enable_thinking: enableThinking,
+        module_id: captureModuleId,
+        feature_index: clampedFeature,
+        strength: Number(clampedStrength.toFixed(6)),
       },
-      captureEnabled && captureModuleId ? [captureModuleId] : [],
+      captures,
     );
   };
+
+  const featureMax = hiddenSize !== null ? hiddenSize - 1 : 2047;
+  const steeringReady = Boolean(captureModuleId) && !disabled && !running;
 
   return (
     <section className="panel generation">
       <header className="panel-header">
         <div>
-          <h2>Baseline generation</h2>
-          <p className="subtle">Same prompt and settings will be reused for steered runs.</p>
+          <h2>Steering and generation</h2>
+          <p className="subtle">Baseline and steered runs reuse the same prompt and settings.</p>
         </div>
       </header>
 
@@ -128,6 +172,59 @@ export function GenerationPanel({
           <span>Enable thinking (off by default)</span>
         </label>
 
+        <div className="steering-box">
+          <h4>Steering (inference-only hook)</h4>
+          <p className="subtle">
+            Target module:{" "}
+            {captureModuleId ? (
+              <code>{captureModuleId}</code>
+            ) : (
+              "select a steerable module in the architecture explorer"
+            )}
+          </p>
+          <div className="form-grid">
+            <label>
+              <span>Feature index (max {featureMax})</span>
+              <input
+                type="number"
+                min={0}
+                max={featureMax}
+                value={featureIndex}
+                onChange={(event) => setFeatureIndex(Number(event.target.value))}
+              />
+            </label>
+            <label>
+              <span>Strength (numeric)</span>
+              <input
+                type="number"
+                min={-STRENGTH_LIMIT}
+                max={STRENGTH_LIMIT}
+                step={0.5}
+                value={strength}
+                onChange={(event) => setStrength(Number(event.target.value))}
+              />
+            </label>
+          </div>
+          <label className="strength-slider">
+            <span>Strength slider: {strength}</span>
+            <input
+              type="range"
+              min={-STRENGTH_LIMIT}
+              max={STRENGTH_LIMIT}
+              step={0.5}
+              value={strength}
+              onChange={(event) => setStrength(Number(event.target.value))}
+            />
+          </label>
+          <button
+            className="secondary"
+            onClick={() => setStrength(0)}
+            disabled={strength === 0}
+          >
+            Reset strength to 0
+          </button>
+        </div>
+
         <label className="checkbox">
           <input
             type="checkbox"
@@ -140,15 +237,57 @@ export function GenerationPanel({
           </span>
         </label>
 
-        <button className="primary" onClick={submit} disabled={disabled || running || !prompt.trim()}>
-          {running ? "Generating…" : "Run baseline"}
-        </button>
+        <div className="button-row">
+          <button className="primary" onClick={submit} disabled={disabled || running || !prompt.trim()}>
+            {running ? "Generating…" : "Run baseline"}
+          </button>
+          <button
+            className="primary"
+            onClick={submitSteered}
+            disabled={!steeringReady || !prompt.trim()}
+            title={captureModuleId ? "Run baseline + steered pair" : "Select a steerable module first"}
+          >
+            {running ? "Generating…" : "Run baseline + steered"}
+          </button>
+        </div>
         {disabled && <p className="subtle">Load the model to enable generation.</p>}
       </div>
 
       {error && <div className="error-banner">{error}</div>}
 
-      {result && (
+      {pair && (
+        <div className="comparison">
+          <h4>Baseline vs steered · hook: {pair.steered.steering?.module_id} · dim{" "}
+            {pair.steered.steering?.feature_index} · α {pair.steered.steering?.strength}</h4>
+          <div className="comparison-columns">
+            {(["baseline", "steered"] as const).map((condition) => {
+              const run = pair[condition];
+              return (
+                <div key={run.id} className="result">
+                  <h5 className="condition-label">{condition}</h5>
+                  <div className="result-meta">
+                    <span>{run.generated_tokens} tokens</span>
+                    <span>{run.duration_ms.toFixed(0)} ms</span>
+                    <span>{run.tokens_per_second?.toFixed(1) ?? "—"} tok/s</span>
+                    <span>{run.device}</span>
+                  </div>
+                  {run.warnings.map((warning) => (
+                    <div key={warning} className="warning-banner inline">
+                      {warning}
+                    </div>
+                  ))}
+                  <pre className="output">{run.output || "(empty output)"}</pre>
+                  <p className="subtle">
+                    run {run.id.slice(0, 8)} · prompt tokens: {run.prompt_tokens}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {!pair && result && (
         <div className="result">
           <div className="result-meta">
             <span>{result.generated_tokens} tokens</span>

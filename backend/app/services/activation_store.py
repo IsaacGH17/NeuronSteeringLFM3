@@ -118,6 +118,7 @@ def build_activation_response(
     position: int = -1,
     max_positions: int = 128,
     max_features: int = 128,
+    compare_with: StoredExperiment | None = None,
 ) -> ActivationResponse:
     try:
         tensor = experiment.captures[module_id]
@@ -125,9 +126,24 @@ def build_activation_response(
         raise KeyError(f"Module {module_id!r} was not captured for experiment {experiment.id!r}.") from exc
 
     array = tensor.numpy()
-    token_count, hidden_size = array.shape
+    comparison: str | None = None
     warnings = list(experiment.warnings)
-    if len(experiment.tokens) != token_count:
+    if compare_with is not None:
+        if module_id not in compare_with.captures:
+            raise KeyError(f"Module {module_id!r} was not captured for experiment {compare_with.id!r}.")
+        other = compare_with.captures[module_id]
+        if other.shape[1] != tensor.shape[1]:
+            raise ValueError(f"Cannot compare: hidden sizes differ ({tensor.shape[1]} vs {other.shape[1]}).")
+        shared_positions = min(tensor.shape[0], other.shape[0])
+        if shared_positions < tensor.shape[0] or shared_positions < other.shape[0]:
+            warnings.append(
+                f"Runs have different lengths ({tensor.shape[0]} vs {other.shape[0]} positions); "
+                f"the difference covers only the first {shared_positions}."
+            )
+        array = (tensor[:shared_positions] - other[:shared_positions]).numpy()
+        comparison = f"difference: {experiment.id} − {compare_with.id}"
+    token_count, hidden_size = array.shape
+    if len(experiment.tokens) != token_count and comparison is None:
         warnings.append(
             f"Captured {token_count} positions but decoded {len(experiment.tokens)} tokens; "
             "token alignment is approximate."
@@ -163,7 +179,12 @@ def build_activation_response(
         module_id=module_id,
         shape=[token_count, hidden_size],
         dtype=str(tensor.dtype).replace("torch.", ""),
-        aggregation="raw values, single sequence; hooks detach and copy to CPU float32",
+        aggregation=(
+            f"difference of two captured tensors ({comparison.split(': ', 1)[-1]}); "
+            if comparison
+            else "raw values, single sequence; "
+        )
+        + "hooks detach and copy to CPU float32",
         prompt_token_count=experiment.prompt_token_count,
         tokens=experiment.tokens,
         heatmap=HeatmapData(
@@ -193,6 +214,7 @@ def build_activation_response(
             positions=list(range(token_count)),
             values=[float(value) for value in array[:, resolved_feature]],
         ),
+        comparison=comparison,
         warnings=warnings,
     )
 

@@ -36,6 +36,9 @@ class Settings:
     host: str = field(default_factory=lambda: os.environ.get("LFM3_HOST", "127.0.0.1"))
     port: int = field(default_factory=lambda: _env_int("LFM3_PORT", 8000))
     max_new_tokens: int = field(default_factory=lambda: _env_int("LFM3_MAX_NEW_TOKENS", 256))
+    max_steering_strength: float = field(
+        default_factory=lambda: float(os.environ.get("LFM3_MAX_STEERING_STRENGTH", "50") or 50)
+    )
     allow_cpu_fallback: bool = field(default_factory=lambda: _env_bool("LFM3_ALLOW_CPU_FALLBACK", True))
     cors_origins: tuple[str, ...] = (
         "http://localhost:5173",

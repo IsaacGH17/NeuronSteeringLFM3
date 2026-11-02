@@ -11,11 +11,17 @@ import uuid
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 import torch
 
-from backend.app.schemas.api import BaselineRequest, BaselineResponse, GenerationSettings, TokenInfo
+from backend.app.schemas.api import (
+    BaselineRequest,
+    BaselineResponse,
+    GenerationSettings,
+    SteeringSpec,
+    TokenInfo,
+)
 from backend.app.services.activation_capture import (
     MAX_CAPTURE_POSITIONS,
     capture_modules,
@@ -23,6 +29,13 @@ from backend.app.services.activation_capture import (
     validate_capture_module_ids,
 )
 from backend.app.services.model_loader import ModelManager
+from backend.app.services.steering_engine import (
+    SteeringSpec as EngineSteeringSpec,
+)
+from backend.app.services.steering_engine import (
+    steer_modules,
+    validate_steering_spec,
+)
 
 
 @dataclass
@@ -110,17 +123,24 @@ def _generation_kwargs(
     return kwargs
 
 
-def generate_baseline(
+def generate_chat(
     manager: ModelManager,
     request: BaselineRequest,
     *,
     capture_ids: list[str] | None = None,
+    steering: SteeringSpec | EngineSteeringSpec | None = None,
+    condition: Literal["baseline", "steered"] = "baseline",
 ) -> GenerationResult:
     model = manager.model
     tokenizer = manager.tokenizer
     device = manager.device
     settings = request.settings
     capture_ids = validate_capture_module_ids(model, capture_ids or [])
+    validated_steering: EngineSteeringSpec | None = None
+    if steering is not None:
+        validated_steering = validate_steering_spec(
+            model, steering, strength_limit=manager.settings.max_steering_strength
+        )
 
     warnings: list[str] = []
     max_new_tokens = min(settings.max_new_tokens, manager.settings.max_new_tokens)
@@ -148,10 +168,15 @@ def generate_baseline(
             torch.cuda.manual_seed_all(settings.seed)
 
     capture_context = capture_modules(model, capture_ids) if capture_ids else nullcontext(({}, []))
+    if validated_steering is None:
+        steer_context = nullcontext(({}, []))
+    else:
+        steer_context = steer_modules(model, [validated_steering])
     start = time.perf_counter()
     with (
         manager.inference_lock,
         torch.inference_mode(),
+        steer_context as (applied_calls, steer_warnings),
         capture_context as (capture_chunks, capture_warnings),
     ):
         output = model.generate(**inputs, **kwargs)
@@ -171,6 +196,12 @@ def generate_baseline(
                 f"Activations cover the {captured_token_count} positions that were forwarded; "
                 "the final generated token has no activation."
             )
+    if validated_steering is not None:
+        if applied_calls.get(validated_steering.module_id, 0) == 0:
+            warnings.append(
+                f"Steering hook on {validated_steering.module_id} never fired; output is unmodified."
+            )
+    warnings.extend(steer_warnings)
     token_infos = _build_tokens(
         tokenizer,
         inputs["input_ids"][0].tolist(),
@@ -180,6 +211,7 @@ def generate_baseline(
     response = BaselineResponse(
         id=uuid.uuid4().hex,
         timestamp=datetime.now(UTC),
+        condition=condition,
         model_id=status.model_id,
         revision=status.revision,
         device=device,
@@ -191,7 +223,27 @@ def generate_baseline(
         duration_ms=round(duration_ms, 2),
         tokens_per_second=round(tokens_per_second, 2) if tokens_per_second is not None else None,
         settings=settings,
+        steering=validated_steering,
         captured_modules=list(captures),
         warnings=warnings + capture_warnings + finalize_warnings,
     )
     return GenerationResult(response=response, tokens=token_infos, captures=captures)
+
+
+def generate_baseline(
+    manager: ModelManager,
+    request: BaselineRequest,
+    *,
+    capture_ids: list[str] | None = None,
+) -> GenerationResult:
+    return generate_chat(manager, request, capture_ids=capture_ids, steering=None, condition="baseline")
+
+
+def generate_steered(
+    manager: ModelManager,
+    request: BaselineRequest,
+    steering: SteeringSpec | EngineSteeringSpec,
+    *,
+    capture_ids: list[str] | None = None,
+) -> GenerationResult:
+    return generate_chat(manager, request, capture_ids=capture_ids, steering=steering, condition="steered")

@@ -8,6 +8,7 @@ import {
   getStatus,
   loadModel as apiLoadModel,
   runBaseline,
+  runSteering,
 } from "./api/client";
 import { ArchitectureExplorer } from "./components/ArchitectureExplorer";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
@@ -21,6 +22,8 @@ import type {
   GenerationSettings,
   ModelStatus,
   ModuleDetail,
+  SteeringResponse,
+  SteeringSpec,
 } from "./types";
 
 function errorMessage(error: unknown): string {
@@ -52,11 +55,13 @@ export default function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [baseline, setBaseline] = useState<BaselineResponse | null>(null);
+  const [pair, setPair] = useState<SteeringResponse | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [activation, setActivation] = useState<ActivationResponse | null>(null);
   const [activationLoading, setActivationLoading] = useState(false);
   const [activationError, setActivationError] = useState<string | null>(null);
   const [capturedIds, setCapturedIds] = useState<Set<string>>(() => new Set());
+  const [compareWith, setCompareWith] = useState<string | null>(null);
   const selectionRequest = useRef(0);
   const activationRequest = useRef(0);
 
@@ -122,7 +127,11 @@ export default function App() {
   };
 
   const loadActivation = useCallback(
-    async (experimentId: string, moduleId: string, query: { feature?: number; position?: number }) => {
+    async (
+      experimentId: string,
+      moduleId: string,
+      query: { feature?: number; position?: number; compareWith?: string | null },
+    ) => {
       const requestId = ++activationRequest.current;
       setActivationLoading(true);
       setActivationError(null);
@@ -156,6 +165,19 @@ export default function App() {
     }
   };
 
+  const setBaselineResult = (run: BaselineResponse) => {
+    setBaseline(run);
+    setPair(null);
+    setCompareWith(null);
+    setCapturedIds((current) => new Set([...current, ...run.captured_modules]));
+    if (run.captured_modules.length > 0) {
+      void loadActivation(run.id, run.captured_modules[0], {});
+    } else {
+      setActivation(null);
+      setActivationError(null);
+    }
+  };
+
   const handleRunBaseline = async (
     prompt: string,
     system: string | null,
@@ -166,10 +188,40 @@ export default function App() {
     setGenerationError(null);
     try {
       const run = await runBaseline(prompt, system, settings, captureModuleIds);
-      setBaseline(run);
-      setCapturedIds(new Set(run.captured_modules));
-      if (run.captured_modules.length > 0) {
-        await loadActivation(run.id, run.captured_modules[0], {});
+      setBaselineResult(run);
+      await refreshDiagnostics();
+    } catch (error) {
+      setGenerationError(errorMessage(error));
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const handleRunSteered = async (
+    prompt: string,
+    system: string | null,
+    settings: GenerationSettings,
+    steering: SteeringSpec,
+    captureModuleIds: string[],
+  ) => {
+    setRunning(true);
+    setGenerationError(null);
+    try {
+      const response = await runSteering(prompt, system, settings, steering, captureModuleIds);
+      setBaseline(null);
+      setPair(response);
+      const captured = new Set([
+        ...response.baseline.captured_modules,
+        ...response.steered.captured_modules,
+      ]);
+      setCapturedIds((current) => new Set([...current, ...captured]));
+      // Show steered − baseline difference for the first captured module.
+      if (response.steered.captured_modules.length > 0) {
+        const moduleId = response.steered.captured_modules[0];
+        setCompareWith(response.baseline.id);
+        await loadActivation(response.steered.id, moduleId, {
+          compareWith: response.baseline.id,
+        });
       } else {
         setActivation(null);
         setActivationError(null);
@@ -223,7 +275,10 @@ export default function App() {
           activationError={activationError}
           onActivationQuery={(query) => {
             if (activation) {
-              void loadActivation(activation.experiment_id, activation.module_id, query);
+              void loadActivation(activation.experiment_id, activation.module_id, {
+                ...query,
+                compareWith,
+              });
             }
           }}
         />
@@ -231,9 +286,12 @@ export default function App() {
           disabled={!status.loaded}
           running={running}
           result={baseline}
+          pair={pair}
           error={generationError}
           captureModuleId={selectedId && detail?.supports_steering ? selectedId : null}
+          hiddenSize={architecture?.hidden_size ?? null}
           onRun={handleRunBaseline}
+          onRunSteered={handleRunSteered}
         />
       </main>
 

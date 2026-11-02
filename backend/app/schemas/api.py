@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 ModelState = Literal["unloaded", "loading", "loaded", "error"]
 
@@ -124,6 +124,14 @@ class GenerationSettings(BaseModel):
     enable_thinking: bool = False
 
 
+class SteeringSpec(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    module_id: str = Field(min_length=1, max_length=256)
+    feature_index: int = Field(ge=0)
+    strength: float = Field(allow_inf_nan=False)
+
+
 class BaselineRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=32_000)
     system: str | None = Field(default=None, max_length=8_000)
@@ -138,10 +146,25 @@ class BaselineRequest(BaseModel):
         return value
 
 
+class SteeringRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=32_000)
+    system: str | None = Field(default=None, max_length=8_000)
+    settings: GenerationSettings = Field(default_factory=GenerationSettings)
+    steering: SteeringSpec
+    capture_module_ids: list[str] = Field(default_factory=list, max_length=8)
+
+    @field_validator("prompt")
+    @classmethod
+    def _prompt_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("prompt must not be blank")
+        return value
+
+
 class BaselineResponse(BaseModel):
     id: str
     timestamp: datetime
-    condition: Literal["baseline"] = "baseline"
+    condition: Literal["baseline", "steered"] = "baseline"
     model_id: str
     revision: str
     device: str
@@ -153,8 +176,14 @@ class BaselineResponse(BaseModel):
     duration_ms: float
     tokens_per_second: float | None = None
     settings: GenerationSettings
+    steering: SteeringSpec | None = None
     captured_modules: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class SteeringResponse(BaseModel):
+    baseline: BaselineResponse
+    steered: BaselineResponse
 
 
 class TokenInfo(BaseModel):
@@ -216,6 +245,7 @@ class ActivationResponse(BaseModel):
     position: int
     top_dimensions: list[TopDimension]
     feature_series: FeatureSeries
+    comparison: str | None = None
     warnings: list[str] = Field(default_factory=list)
 
 

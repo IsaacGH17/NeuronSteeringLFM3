@@ -99,10 +99,16 @@ export interface GenerationSettings {
   enable_thinking: boolean;
 }
 
+export interface SteeringSpec {
+  module_id: string;
+  feature_index: number;
+  strength: number;
+}
+
 export interface BaselineResponse {
   id: string;
   timestamp: string;
-  condition: "baseline";
+  condition: "baseline" | "steered";
   model_id: string;
   revision: string;
   device: string;
@@ -114,8 +120,14 @@ export interface BaselineResponse {
   duration_ms: number;
   tokens_per_second: number | null;
   settings: GenerationSettings;
+  steering: SteeringSpec | null;
   captured_modules: string[];
   warnings: string[];
+}
+
+export interface SteeringResponse {
+  baseline: BaselineResponse;
+  steered: BaselineResponse;
 }
 
 export interface TokenInfo {
@@ -177,5 +189,6 @@ export interface ActivationResponse {
   position: number;
   top_dimensions: TopDimension[];
   feature_series: FeatureSeries;
+  comparison: string | null;
   warnings: string[];
 }

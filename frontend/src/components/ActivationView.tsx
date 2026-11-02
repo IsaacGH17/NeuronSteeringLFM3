@@ -240,6 +240,7 @@ export function ActivationView({ activation, loading, error, onQuery }: Props) {
         {loading && <span className="subtle">updating…</span>}
       </div>
       <p className="subtle">{activation.aggregation}</p>
+      {activation.comparison && <div className="callout ok">{activation.comparison}</div>}
       {activation.warnings.map((warning) => (
         <div key={warning} className="warning-banner inline">
           {warning}

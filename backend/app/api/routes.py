@@ -16,6 +16,8 @@ from backend.app.schemas.api import (
     LoadModelRequest,
     ModelStatus,
     ModuleDetail,
+    SteeringRequest,
+    SteeringResponse,
 )
 from backend.app.services.activation_store import (
     activation_store,
@@ -23,12 +25,13 @@ from backend.app.services.activation_store import (
     store_experiment,
 )
 from backend.app.services.architecture_inspector import build_architecture, describe_module
-from backend.app.services.generation import generate_baseline
+from backend.app.services.generation import generate_baseline, generate_steered
 from backend.app.services.model_loader import (
     ModelLoadError,
     ModelManager,
     ModelNotLoadedError,
 )
+from backend.app.services.steering_engine import validate_steering_spec
 
 router = APIRouter(prefix="/api")
 
@@ -88,37 +91,71 @@ def model_module(module_id: str, request: Request) -> ModuleDetail:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+def _record(result) -> None:
+    if result.captures:
+        store_experiment(
+            experiment_id=result.response.id,
+            created_at=result.response.timestamp,
+            model_id=result.response.model_id,
+            revision=result.response.revision,
+            prompt=result.response.prompt,
+            system=result.response.system,
+            output=result.response.output,
+            prompt_token_count=result.response.prompt_tokens,
+            generated_tokens=result.response.generated_tokens,
+            tokens=result.tokens,
+            captures=result.captures,
+            warnings=result.response.warnings,
+        )
+
+
+def _fail(exc: Exception) -> HTTPException:
+    if isinstance(exc, ModelNotLoadedError):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, torch.cuda.OutOfMemoryError):
+        return HTTPException(
+            status_code=507,
+            detail=f"GPU out of memory: {exc}. Reduce max_new_tokens or prompt length.",
+        )
+    if isinstance(exc, ValueError):
+        return HTTPException(status_code=400, detail=str(exc))
+    raise exc
+
+
 @router.post("/experiments/baseline", response_model=BaselineResponse)
 def baseline(payload: BaselineRequest, request: Request) -> BaselineResponse:
     manager = get_manager(request)
     _require_loaded(manager)
     try:
         result = generate_baseline(manager, payload, capture_ids=payload.capture_module_ids)
-        if result.captures:
-            store_experiment(
-                experiment_id=result.response.id,
-                created_at=result.response.timestamp,
-                model_id=result.response.model_id,
-                revision=result.response.revision,
-                prompt=result.response.prompt,
-                system=result.response.system,
-                output=result.response.output,
-                prompt_token_count=result.response.prompt_tokens,
-                generated_tokens=result.response.generated_tokens,
-                tokens=result.tokens,
-                captures=result.captures,
-                warnings=result.response.warnings,
-            )
+        _record(result)
         return result.response
-    except ModelNotLoadedError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except torch.cuda.OutOfMemoryError as exc:
-        raise HTTPException(
-            status_code=507,
-            detail=f"GPU out of memory: {exc}. Reduce max_new_tokens or prompt length.",
-        ) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ModelNotLoadedError, torch.cuda.OutOfMemoryError, ValueError) as exc:
+        raise _fail(exc) from exc
+
+
+@router.post("/experiments/steering", response_model=SteeringResponse)
+def steering(payload: SteeringRequest, request: Request) -> SteeringResponse:
+    manager = get_manager(request)
+    _require_loaded(manager)
+    payload.capture_module_ids = list(dict.fromkeys(payload.capture_module_ids))
+    try:
+        # Validate the steering spec up front so 400s hit before any generation.
+        validate_steering_spec(
+            manager.model, payload.steering, strength_limit=manager.settings.max_steering_strength
+        )
+        baseline_result = generate_baseline(manager, payload, capture_ids=payload.capture_module_ids)
+        steered_result = generate_steered(
+            manager,
+            payload,
+            payload.steering,
+            capture_ids=payload.capture_module_ids,
+        )
+        _record(baseline_result)
+        _record(steered_result)
+        return SteeringResponse(baseline=baseline_result.response, steered=steered_result.response)
+    except (ModelNotLoadedError, torch.cuda.OutOfMemoryError, ValueError) as exc:
+        raise _fail(exc) from exc
 
 
 @router.get("/experiments/{experiment_id}/activations", response_model=list[ActivationSummary])
@@ -140,9 +177,11 @@ def experiment_activation(
     position: int = -1,
     max_positions: int = Query(default=128, ge=1, le=512),
     max_features: int = Query(default=128, ge=1, le=512),
+    compare_with: str | None = None,
 ) -> ActivationResponse:
     try:
         experiment = activation_store.get(experiment_id)
+        reference = activation_store.get(compare_with) if compare_with else None
         return build_activation_response(
             experiment,
             module_id,
@@ -150,6 +189,7 @@ def experiment_activation(
             position=position,
             max_positions=max_positions,
             max_features=max_features,
+            compare_with=reference,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

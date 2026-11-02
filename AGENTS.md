@@ -56,6 +56,16 @@ Interactive GUI to inspect and steer activations of `LiquidAI/LFM3-1.7B` (PyTorc
 - Activation payloads include token alignment (prompt/generated), evenly sampled heatmap, 40-bin histogram, stats, top-20 dimensions, and a feature series. The final generated token usually has no activation because it is never forwarded.
 - Frontend center panel shows the real tensor: token strip, canvas heatmap with tooltip/legend, clickable feature chart, distribution, top dimensions, and captured-module indicators in the architecture explorer.
 
+## Phase 4 status (implemented and verified)
+
+- `backend/app/services/steering_engine.py` — `SteeringSpec` (module, feature_index, strength), validation (class must be a hidden-state module, index bounded by `hidden_size`, strength finite and ≤ `settings.max_steering_strength`, default ±50, env `LFM3_MAX_STEERING_STRENGTH`), and `steer_modules()` contextmanager: forward hooks installed per experiment, removed in `finally`.
+- Steering is out-of-place everywhere: the hook clones the output (`h[..., i] + alpha` only for zero-strength-safe identity elsewhere) and rebuilds tuples (`Lfm3Attention` returns `(attn_output, attn_weights)`; first tensor is steered).
+- `POST /api/experiments/steering` runs a baseline + steered pair with identical prompt/settings/seed and stores both in the activation store; responses carry `condition` ("baseline"/"steered") and the applied `steering` spec.
+- `GET /api/experiments/{id}/activations/{module_id}?compare_with={other_id}` returns a difference view (`steered − baseline`, direction labeled, truncated to shared positions with a warning).
+- Hook ordering matters: capture hooks see steered tensors because steer contexts are entered before capture contexts in `generate_chat`.
+- Real-model smoke verified on the RX 7600: zero strength reproduces baseline exactly; α = −12 on `model.layers.22.feed_forward` dim 500 changed the actual output text.
+- Frontend right panel: steering box (feature index + strength numeric + slider + reset), "Run baseline + steered" button, side-by-side comparison with per-condition metadata; center panel shows the labeled difference tensor.
+
 ## Still open
 
 - ROCm path notably emits benign stderr noise (`(null): No such file or directory`) at import.

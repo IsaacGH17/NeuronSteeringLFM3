@@ -7,6 +7,8 @@ import type {
   GenerationSettings,
   ModelStatus,
   ModuleDetail,
+  SteeringResponse,
+  SteeringSpec,
 } from "../types";
 
 const API_BASE = "/api";
@@ -78,6 +80,19 @@ export function runBaseline(
   });
 }
 
+export function runSteering(
+  prompt: string,
+  system: string | null,
+  settings: GenerationSettings,
+  steering: SteeringSpec,
+  captureModuleIds: string[] = [],
+): Promise<SteeringResponse> {
+  return request<SteeringResponse>("/experiments/steering", {
+    method: "POST",
+    body: JSON.stringify({ prompt, system, settings, steering, capture_module_ids: captureModuleIds }),
+  });
+}
+
 export function listActivations(experimentId: string): Promise<ActivationSummary[]> {
   return request<ActivationSummary[]>(`/experiments/${experimentId}/activations`);
 }
@@ -87,6 +102,7 @@ export interface ActivationQuery {
   position?: number;
   maxPositions?: number;
   maxFeatures?: number;
+  compareWith?: string | null;
 }
 
 export function getActivation(
@@ -99,6 +115,7 @@ export function getActivation(
   if (query.position !== undefined) params.set("position", String(query.position));
   if (query.maxPositions !== undefined) params.set("max_positions", String(query.maxPositions));
   if (query.maxFeatures !== undefined) params.set("max_features", String(query.maxFeatures));
+  if (query.compareWith) params.set("compare_with", query.compareWith);
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
   return request<ActivationResponse>(`/experiments/${experimentId}/activations/${moduleId}${suffix}`);
 }
