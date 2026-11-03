@@ -6,12 +6,15 @@ import {
   getDiagnostics,
   getModule,
   getStatus,
+  listActivations,
   loadModel as apiLoadModel,
   runBaseline,
   runSteering,
+  runSweep,
 } from "./api/client";
 import { ArchitectureExplorer } from "./components/ArchitectureExplorer";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
+import { ExperimentHistory } from "./components/ExperimentHistory";
 import { GenerationPanel } from "./components/GenerationPanel";
 import { ModuleInspector } from "./components/ModuleInspector";
 import type {
@@ -24,6 +27,7 @@ import type {
   ModuleDetail,
   SteeringResponse,
   SteeringSpec,
+  SweepResponse,
 } from "./types";
 
 function errorMessage(error: unknown): string {
@@ -57,11 +61,14 @@ export default function App() {
   const [baseline, setBaseline] = useState<BaselineResponse | null>(null);
   const [pair, setPair] = useState<SteeringResponse | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [sweepResult, setSweepResult] = useState<SweepResponse | null>(null);
+  const [sweepError, setSweepError] = useState<string | null>(null);
   const [activation, setActivation] = useState<ActivationResponse | null>(null);
   const [activationLoading, setActivationLoading] = useState(false);
   const [activationError, setActivationError] = useState<string | null>(null);
   const [capturedIds, setCapturedIds] = useState<Set<string>>(() => new Set());
   const [compareWith, setCompareWith] = useState<string | null>(null);
+  const [historyRefresh, setHistoryRefresh] = useState(0);
   const selectionRequest = useRef(0);
   const activationRequest = useRef(0);
 
@@ -168,8 +175,11 @@ export default function App() {
   const setBaselineResult = (run: BaselineResponse) => {
     setBaseline(run);
     setPair(null);
+    setSweepResult(null);
+    setSweepError(null);
     setCompareWith(null);
     setCapturedIds((current) => new Set([...current, ...run.captured_modules]));
+    setHistoryRefresh((value) => value + 1);
     if (run.captured_modules.length > 0) {
       void loadActivation(run.id, run.captured_modules[0], {});
     } else {
@@ -183,11 +193,12 @@ export default function App() {
     system: string | null,
     settings: GenerationSettings,
     captureModuleIds: string[],
+    persistActivations: boolean | null = null,
   ) => {
     setRunning(true);
     setGenerationError(null);
     try {
-      const run = await runBaseline(prompt, system, settings, captureModuleIds);
+      const run = await runBaseline(prompt, system, settings, captureModuleIds, persistActivations);
       setBaselineResult(run);
       await refreshDiagnostics();
     } catch (error) {
@@ -203,18 +214,22 @@ export default function App() {
     settings: GenerationSettings,
     steering: SteeringSpec,
     captureModuleIds: string[],
+    persistActivations: boolean | null = null,
   ) => {
     setRunning(true);
     setGenerationError(null);
     try {
-      const response = await runSteering(prompt, system, settings, steering, captureModuleIds);
+      const response = await runSteering(prompt, system, settings, steering, captureModuleIds, persistActivations);
       setBaseline(null);
+      setSweepResult(null);
+      setSweepError(null);
       setPair(response);
       const captured = new Set([
         ...response.baseline.captured_modules,
         ...response.steered.captured_modules,
       ]);
       setCapturedIds((current) => new Set([...current, ...captured]));
+      setHistoryRefresh((value) => value + 1);
       // Show steered − baseline difference for the first captured module.
       if (response.steered.captured_modules.length > 0) {
         const moduleId = response.steered.captured_modules[0];
@@ -231,6 +246,66 @@ export default function App() {
       setGenerationError(errorMessage(error));
     } finally {
       setRunning(false);
+    }
+  };
+
+  const handleRunSweep = async (payload: {
+    prompt: string;
+    system: string | null;
+    settings: GenerationSettings;
+    module_id: string;
+    feature_index: number;
+    strengths: number[];
+    include_control: boolean;
+    control_seed: number | null;
+    repeats: number;
+    capture_module_ids: string[];
+    persist_activations: boolean | null;
+  }) => {
+    setRunning(true);
+    setSweepError(null);
+    setSweepResult(null);
+    setGenerationError(null);
+    try {
+      const response = await runSweep(payload);
+      setBaseline(null);
+      setPair(null);
+      setSweepResult(response);
+      const captured = new Set<string>();
+      for (const run of response.runs) {
+        for (const moduleId of run.run.captured_modules) {
+          captured.add(moduleId);
+        }
+      }
+      setCapturedIds((current) => new Set([...current, ...captured]));
+      setHistoryRefresh((value) => value + 1);
+      await refreshDiagnostics();
+    } catch (error) {
+      setSweepError(errorMessage(error));
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const handleOpenHistoricalActivations = async (experimentId: string, moduleId: string) => {
+    setActivationError(null);
+    try {
+      const summaries = await listActivations(experimentId);
+      if (summaries.length === 0) {
+        throw new Error("No activation data available for this experiment.");
+      }
+      const target = summaries.find((summary) => summary.module_id === moduleId) ?? summaries[0];
+      setCompareWith(null);
+      if (status.loaded) {
+        await handleSelect(target.module_id);
+      } else {
+        setSelectedId(target.module_id);
+        setDetail(null);
+        setDetailError(null);
+      }
+      await loadActivation(experimentId, target.module_id, {});
+    } catch (error) {
+      setActivationError(errorMessage(error));
     }
   };
 
@@ -287,14 +362,18 @@ export default function App() {
           running={running}
           result={baseline}
           pair={pair}
+          sweepResult={sweepResult}
+          sweepError={sweepError}
           error={generationError}
           captureModuleId={selectedId && detail?.supports_steering ? selectedId : null}
           hiddenSize={architecture?.hidden_size ?? null}
           onRun={handleRunBaseline}
           onRunSteered={handleRunSteered}
+          onRunSweep={handleRunSweep}
         />
       </main>
 
+      <ExperimentHistory refreshTrigger={historyRefresh} onOpenActivations={handleOpenHistoricalActivations} />
       <DiagnosticsPanel diagnostics={diagnostics} />
     </div>
   );

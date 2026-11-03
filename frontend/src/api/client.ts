@@ -4,11 +4,14 @@ import type {
   Architecture,
   BaselineResponse,
   Diagnostics,
+  ExperimentDetail,
+  ExperimentListResponse,
   GenerationSettings,
   ModelStatus,
   ModuleDetail,
   SteeringResponse,
   SteeringSpec,
+  SweepResponse,
 } from "../types";
 
 const API_BASE = "/api";
@@ -73,10 +76,17 @@ export function runBaseline(
   system: string | null,
   settings: GenerationSettings,
   captureModuleIds: string[] = [],
+  persistActivations: boolean | null = null,
 ): Promise<BaselineResponse> {
   return request<BaselineResponse>("/experiments/baseline", {
     method: "POST",
-    body: JSON.stringify({ prompt, system, settings, capture_module_ids: captureModuleIds }),
+    body: JSON.stringify({
+      prompt,
+      system,
+      settings,
+      capture_module_ids: captureModuleIds,
+      persist_activations: persistActivations,
+    }),
   });
 }
 
@@ -86,11 +96,84 @@ export function runSteering(
   settings: GenerationSettings,
   steering: SteeringSpec,
   captureModuleIds: string[] = [],
+  persistActivations: boolean | null = null,
 ): Promise<SteeringResponse> {
   return request<SteeringResponse>("/experiments/steering", {
     method: "POST",
-    body: JSON.stringify({ prompt, system, settings, steering, capture_module_ids: captureModuleIds }),
+    body: JSON.stringify({
+      prompt,
+      system,
+      settings,
+      steering,
+      capture_module_ids: captureModuleIds,
+      persist_activations: persistActivations,
+    }),
   });
+}
+
+export interface SweepPayload {
+  prompt: string;
+  system: string | null;
+  settings: GenerationSettings;
+  module_id: string;
+  feature_index: number;
+  strengths: number[];
+  include_control: boolean;
+  control_seed: number | null;
+  repeats: number;
+  capture_module_ids: string[];
+  persist_activations: boolean | null;
+}
+
+export function runSweep(payload: SweepPayload): Promise<SweepResponse> {
+  return request<SweepResponse>("/experiments/sweep", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export interface ExperimentListParams {
+  condition?: "baseline" | "steered" | "control";
+  sweep_id?: string;
+  module_id?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export function listExperiments(params: ExperimentListParams = {}): Promise<ExperimentListResponse> {
+  const search = new URLSearchParams();
+  if (params.condition) search.set("condition", params.condition);
+  if (params.sweep_id) search.set("sweep_id", params.sweep_id);
+  if (params.module_id) search.set("module_id", params.module_id);
+  if (params.limit !== undefined) search.set("limit", String(params.limit));
+  if (params.offset !== undefined) search.set("offset", String(params.offset));
+  const suffix = search.size > 0 ? `?${search.toString()}` : "";
+  return request<ExperimentListResponse>(`/experiments${suffix}`);
+}
+
+export function getExperiment(experimentId: string): Promise<ExperimentDetail> {
+  return request<ExperimentDetail>(`/experiments/${experimentId}`);
+}
+
+export interface ExportParams {
+  format: "jsonl" | "csv";
+  ids?: string[];
+}
+
+export function buildExportUrl(params: ExportParams): string {
+  const search = new URLSearchParams();
+  search.set("format", params.format);
+  if (params.ids && params.ids.length > 0) search.set("ids", params.ids.join(","));
+  return `${API_BASE}/experiments/export?${search.toString()}`;
+}
+
+export function downloadExport(params: ExportParams): void {
+  const link = document.createElement("a");
+  link.href = buildExportUrl(params);
+  link.download = params.format === "csv" ? "experiments.csv" : "experiments.jsonl";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 export function listActivations(experimentId: string): Promise<ActivationSummary[]> {

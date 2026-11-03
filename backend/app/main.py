@@ -8,16 +8,25 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.app.api.routes import router
 from backend.app.core.settings import settings
+from backend.app.core.version import APP_VERSION
+from backend.app.services.experiment_store import ExperimentStore
 from backend.app.services.model_loader import ModelManager
 
 
-def create_app(manager: ModelManager | None = None) -> FastAPI:
+def create_app(
+    manager: ModelManager | None = None,
+    experiment_store: ExperimentStore | None = None,
+) -> FastAPI:
     app = FastAPI(
         title="LFM3 Neuron Explorer",
-        version="0.1.0",
+        version=APP_VERSION,
         description="Inspect and steer activations of LiquidAI/LFM3-1.7B during inference.",
     )
     app.state.manager = manager or ModelManager()
+    app.state.experiment_store = experiment_store or ExperimentStore(
+        data_dir=settings.data_dir,
+        persist_activations_default=settings.persist_activations,
+    )
 
     app.add_middleware(
         CORSMiddleware,

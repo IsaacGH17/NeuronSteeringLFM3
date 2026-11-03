@@ -105,10 +105,13 @@ export interface SteeringSpec {
   strength: number;
 }
 
+export type ExperimentCondition = "baseline" | "steered" | "control";
+export type ExperimentConditionDetail = "none" | "positive" | "negative" | "zero" | "control";
+
 export interface BaselineResponse {
   id: string;
   timestamp: string;
-  condition: "baseline" | "steered";
+  condition: ExperimentCondition;
   model_id: string;
   revision: string;
   device: string;
@@ -128,6 +131,80 @@ export interface BaselineResponse {
 export interface SteeringResponse {
   baseline: BaselineResponse;
   steered: BaselineResponse;
+}
+
+export interface EnvironmentInfo {
+  python_version: string;
+  torch_version: string;
+  transformers_version: string;
+  fastapi_version: string;
+  app_version: string;
+  platform: string;
+  git_commit: string;
+}
+
+export interface ExperimentSummary {
+  id: string;
+  timestamp: string;
+  model_id: string;
+  revision: string;
+  resolved_revision: string;
+  device: string;
+  condition: ExperimentCondition;
+  condition_detail: ExperimentConditionDetail;
+  sweep_id: string | null;
+  sweep_index: number | null;
+  repeat_index: number | null;
+  module_id: string | null;
+  feature_index: number | null;
+  strength: number | null;
+  prompt_preview: string;
+  output_preview: string;
+  has_activations: boolean;
+  activation_source: "live" | "snapshot" | null;
+  duration_ms: number;
+  tokens_per_second: number | null;
+}
+
+export interface CaptureInfo {
+  module_id: string;
+  shape: number[];
+  dtype: string;
+}
+
+export interface ExperimentDetail extends ExperimentSummary {
+  system: string | null;
+  prompt: string;
+  output: string;
+  prompt_tokens: number;
+  generated_tokens: number;
+  settings: GenerationSettings;
+  steering: SteeringSpec | null;
+  captured_modules: string[];
+  captures: CaptureInfo[];
+  warnings: string[];
+  environment: EnvironmentInfo;
+  tokens: TokenInfo[];
+}
+
+export interface ExperimentListResponse {
+  total: number;
+  offset: number;
+  limit: number;
+  items: ExperimentSummary[];
+}
+
+export interface SweepRun {
+  kind: "baseline" | "strength" | "control";
+  sweep_index: number;
+  repeat_index: number;
+  run: BaselineResponse;
+}
+
+export interface SweepResponse {
+  sweep_id: string;
+  runs: SweepRun[];
+  warnings: string[];
 }
 
 export interface TokenInfo {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -10,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.core.settings import Settings
 from backend.app.main import create_app
+from backend.app.services.experiment_store import ExperimentStore
 from backend.app.services.model_loader import ModelManager
 from backend.app.vendor.configuration_lfm3 import Lfm3Config
 from backend.app.vendor.modeling_lfm3 import Lfm3ForCausalLM
@@ -74,5 +76,10 @@ def manager(tiny_model: Lfm3ForCausalLM, fake_tokenizer: FakeTokenizer) -> Model
 
 
 @pytest.fixture
-def client(manager: ModelManager) -> TestClient:
-    return TestClient(create_app(manager))
+def experiment_store(tmp_path: Path) -> ExperimentStore:
+    return ExperimentStore(data_dir=tmp_path, persist_activations_default=False)
+
+
+@pytest.fixture
+def client(manager: ModelManager, experiment_store: ExperimentStore) -> TestClient:
+    return TestClient(create_app(manager, experiment_store))

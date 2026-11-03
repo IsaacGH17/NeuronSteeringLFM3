@@ -66,8 +66,19 @@ Interactive GUI to inspect and steer activations of `LiquidAI/LFM3-1.7B` (PyTorc
 - Real-model smoke verified on the RX 7600: zero strength reproduces baseline exactly; α = −12 on `model.layers.22.feed_forward` dim 500 changed the actual output text.
 - Frontend right panel: steering box (feature index + strength numeric + slider + reset), "Run baseline + steered" button, side-by-side comparison with per-condition metadata; center panel shows the labeled difference tensor.
 
+## Phase 5 status (implemented and verified)
+
+- `backend/app/services/experiment_store.py` persists every run (including runs with no captures) as append-only JSONL metadata under `settings.data_dir/experiments.jsonl`; reload tolerates a corrupt trailing line. Metadata includes the full request/result, tokens, captured tensor shapes/dtypes, environment (python/torch/transformers/fastapi versions, app version, git commit, platform), derived `condition_detail`, and sweep fields.
+- Runs are recorded immediately after each generation completes, so a baseline survives a later steered/sweep failure. Completed sweep runs remain queryable if the sweep aborts.
+- Activation snapshots are optional: `persist_activations` per request (or `LFM3_PERSIST_ACTIVATIONS`) writes `.npz` under `data/activations/<id>.npz` (id validated as 32 hex chars; path containment checked on restore) and restores lazily into the in-memory `ActivationStore` only if it fits the byte budget.
+- Routes: `POST /api/experiments/sweep`, `GET /api/experiments` (filters `condition`/`sweep_id`/`module_id`, pagination), `GET /api/experiments/export?format=jsonl|csv&ids=` (export route declared before `/{id}`), `GET /api/experiments/{id}`. Activation GETs fall back to snapshots; a known run with no captures returns `[]` for the list route and 404 for the tensor route.
+- Sweeps: strengths 1-9, repeats 1-3, total runs <=31; seeded random-feature control excludes the target feature and matches the max magnitude/sign of the last strength; control runs actually apply their hook (`condition="control"`). Greedy repeats warn that outputs are identical; unseeded sampling repeats warn they are not reproducible.
+- Frontend: collapsible experiment-history panel (list/detail/compare/export, reopen available snapshots) and sweep controls/results in the generation panel; persist-snapshot checkbox sends an explicit boolean.
+- Tests: `backend/tests/test_experiments.py` covers persistence/restart, corrupt tail, filters/pagination, export content + CSV injection/numeric integrity, route ordering, sweep ordering/control/seed/warnings, snapshot save/restore/containment/size guard, and no-capture behavior.
+
 ## Still open
 
 - ROCm path notably emits benign stderr noise (`(null): No such file or directory`) at import.
-- First real generation includes ~5–6 s of ROCm/SDPA warmup; later tokens are faster. Keep generation bounded (8 GB physical VRAM).
-- Activation tensors are not persisted; reopening old experiments after a backend restart is Phase 5 work.
+- First real generation includes ~5-6 s of ROCm/SDPA warmup; later tokens are faster. Keep generation bounded (8 GB physical VRAM).
+- Sweeps run sequentially with no cancellation/streaming progress; document wall-time before large sweeps.
+- Frontend has no automated component tests yet (PLAN §15); Phase 6 work.

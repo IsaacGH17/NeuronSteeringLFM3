@@ -129,7 +129,7 @@ def generate_chat(
     *,
     capture_ids: list[str] | None = None,
     steering: SteeringSpec | EngineSteeringSpec | None = None,
-    condition: Literal["baseline", "steered"] = "baseline",
+    condition: Literal["baseline", "steered", "control"] = "baseline",
 ) -> GenerationResult:
     model = manager.model
     tokenizer = manager.tokenizer

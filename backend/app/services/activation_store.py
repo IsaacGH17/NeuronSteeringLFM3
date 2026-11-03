@@ -80,6 +80,10 @@ class ActivationStore:
             except KeyError as exc:
                 raise KeyError(f"Unknown experiment {experiment_id!r}.") from exc
 
+    def is_live(self, experiment_id: str) -> bool:
+        with self._lock:
+            return experiment_id in self._entries
+
     def list(self, experiment_id: str) -> list[ActivationSummary]:
         experiment = self.get(experiment_id)
         return [
@@ -217,43 +221,3 @@ def build_activation_response(
         comparison=comparison,
         warnings=warnings,
     )
-
-
-activation_store = ActivationStore()
-
-
-def clear_store() -> None:
-    activation_store.clear()
-
-
-def store_experiment(
-    *,
-    experiment_id: str,
-    created_at: datetime,
-    model_id: str,
-    revision: str,
-    prompt: str,
-    system: str | None,
-    output: str,
-    prompt_token_count: int,
-    generated_tokens: int,
-    tokens: list[TokenInfo],
-    captures: dict[str, torch.Tensor],
-    warnings: list[str] | None = None,
-) -> StoredExperiment:
-    experiment = StoredExperiment(
-        id=experiment_id,
-        created_at=created_at,
-        model_id=model_id,
-        revision=revision,
-        prompt=prompt,
-        system=system,
-        output=output,
-        prompt_token_count=prompt_token_count,
-        generated_tokens=generated_tokens,
-        tokens=tokens,
-        captures=captures,
-        warnings=list(warnings or []),
-    )
-    activation_store.add(experiment)
-    return experiment

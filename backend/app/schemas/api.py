@@ -6,6 +6,7 @@ describe exactly what the frontend may display.
 
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from typing import Literal
 
@@ -137,6 +138,7 @@ class BaselineRequest(BaseModel):
     system: str | None = Field(default=None, max_length=8_000)
     settings: GenerationSettings = Field(default_factory=GenerationSettings)
     capture_module_ids: list[str] = Field(default_factory=list, max_length=8)
+    persist_activations: bool | None = None
 
     @field_validator("prompt")
     @classmethod
@@ -152,6 +154,7 @@ class SteeringRequest(BaseModel):
     settings: GenerationSettings = Field(default_factory=GenerationSettings)
     steering: SteeringSpec
     capture_module_ids: list[str] = Field(default_factory=list, max_length=8)
+    persist_activations: bool | None = None
 
     @field_validator("prompt")
     @classmethod
@@ -164,7 +167,7 @@ class SteeringRequest(BaseModel):
 class BaselineResponse(BaseModel):
     id: str
     timestamp: datetime
-    condition: Literal["baseline", "steered"] = "baseline"
+    condition: Literal["baseline", "steered", "control"] = "baseline"
     model_id: str
     revision: str
     device: str
@@ -184,6 +187,109 @@ class BaselineResponse(BaseModel):
 class SteeringResponse(BaseModel):
     baseline: BaselineResponse
     steered: BaselineResponse
+
+
+class EnvironmentInfo(BaseModel):
+    python_version: str
+    torch_version: str
+    transformers_version: str
+    fastapi_version: str
+    app_version: str
+    platform: str
+    git_commit: str
+
+
+class ExperimentSummary(BaseModel):
+    id: str
+    timestamp: datetime
+    model_id: str
+    revision: str
+    resolved_revision: str
+    device: str
+    condition: Literal["baseline", "steered", "control"]
+    condition_detail: Literal["none", "positive", "negative", "zero", "control"]
+    sweep_id: str | None = None
+    sweep_index: int | None = None
+    repeat_index: int | None = None
+    module_id: str | None = None
+    feature_index: int | None = None
+    strength: float | None = None
+    prompt_preview: str
+    output_preview: str
+    has_activations: bool
+    activation_source: Literal["live", "snapshot"] | None = None
+    duration_ms: float
+    tokens_per_second: float | None = None
+
+
+class CaptureInfo(BaseModel):
+    module_id: str
+    shape: list[int]
+    dtype: str
+
+
+class ExperimentDetail(ExperimentSummary):
+    system: str | None = None
+    prompt: str
+    output: str
+    prompt_tokens: int
+    generated_tokens: int
+    settings: GenerationSettings
+    steering: SteeringSpec | None = None
+    captured_modules: list[str] = Field(default_factory=list)
+    captures: list[CaptureInfo] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    environment: EnvironmentInfo
+    tokens: list[TokenInfo]
+
+
+class ExperimentListResponse(BaseModel):
+    total: int
+    offset: int
+    limit: int
+    items: list[ExperimentSummary]
+
+
+class SweepRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=32_000)
+    system: str | None = Field(default=None, max_length=8_000)
+    settings: GenerationSettings = Field(default_factory=GenerationSettings)
+    module_id: str = Field(min_length=1, max_length=256)
+    feature_index: int = Field(ge=0)
+    strengths: list[float] = Field(min_length=1, max_length=9)
+    include_control: bool = False
+    control_seed: int | None = None
+    repeats: int = Field(default=1, ge=1, le=3)
+    capture_module_ids: list[str] = Field(default_factory=list, max_length=8)
+    persist_activations: bool | None = None
+
+    @field_validator("prompt")
+    @classmethod
+    def _prompt_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("prompt must not be blank")
+        return value
+
+    @field_validator("strengths")
+    @classmethod
+    def _strengths_finite(cls, value: list[float]) -> list[float]:
+        for strength in value:
+            if not math.isfinite(strength):
+                raise ValueError("strengths must be finite")
+        return value
+
+
+class SweepRun(BaseModel):
+    kind: Literal["baseline", "strength", "control"]
+    sweep_index: int
+    repeat_index: int
+    run: BaselineResponse
+
+
+class SweepResponse(BaseModel):
+    sweep_id: str
+    runs: list[SweepRun]
+    warnings: list[str] = Field(default_factory=list)
 
 
 class TokenInfo(BaseModel):

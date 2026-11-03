@@ -33,13 +33,32 @@ export function ModuleInspector({
       <header className="panel-header">
         <div>
           <h2>Module inspector</h2>
-          <p className="subtle">Metadata comes from the loaded model; activations arrive in Phase 3.</p>
+          <p className="subtle">Module metadata comes from the loaded model; activations can come from a live run or a saved snapshot.</p>
         </div>
       </header>
 
       {!selectedId && <div className="empty">Select a module in the architecture explorer.</div>}
       {selectedId && loading && <div className="empty">Loading {selectedId}…</div>}
       {error && <div className="error-banner">{error}</div>}
+
+      {!detail && !loading && activation && (
+        <div className="inspector-body">
+          <div className="module-title">
+            <h3>{activation.module_id}</h3>
+            <span className="badge muted-badge">saved run</span>
+          </div>
+          <p className="subtle">
+            Live module metadata is unavailable; the saved activation tensor is shown below.
+          </p>
+          <h4>Activations</h4>
+          <ActivationView
+            activation={activation}
+            loading={activationLoading}
+            error={activationError}
+            onQuery={onActivationQuery}
+          />
+        </div>
+      )}
 
       {detail && !loading && (
         <div className="inspector-body">

@@ -14,6 +14,13 @@ DEFAULT_MODEL_ID = "LiquidAI/LFM3-1.7B"
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
+def _env_path(name: str, default: Path) -> Path:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return Path(raw).expanduser().resolve()
+
+
 def _env_int(name: str, default: int) -> int:
     raw = os.environ.get(name)
     if raw is None or raw.strip() == "":
@@ -40,6 +47,8 @@ class Settings:
         default_factory=lambda: float(os.environ.get("LFM3_MAX_STEERING_STRENGTH", "50") or 50)
     )
     allow_cpu_fallback: bool = field(default_factory=lambda: _env_bool("LFM3_ALLOW_CPU_FALLBACK", True))
+    data_dir: Path = field(default_factory=lambda: _env_path("LFM3_DATA_DIR", PROJECT_ROOT / "data"))
+    persist_activations: bool = field(default_factory=lambda: _env_bool("LFM3_PERSIST_ACTIVATIONS", False))
     cors_origins: tuple[str, ...] = (
         "http://localhost:5173",
         "http://127.0.0.1:5173",
