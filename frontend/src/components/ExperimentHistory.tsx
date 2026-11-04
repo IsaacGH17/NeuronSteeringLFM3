@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { downloadExport, getExperiment, listExperiments } from "../api/client";
 import type { ExperimentDetail, ExperimentSummary } from "../types";
+import { tooltipTitle, useTooltips } from "../ui/tooltips";
 
 interface Props {
   refreshTrigger: number;
@@ -38,6 +39,7 @@ function steeringLabel(summary: ExperimentSummary): string {
 }
 
 export function ExperimentHistory({ refreshTrigger, onOpenActivations }: Props) {
+  const { enabled: tooltipsEnabled } = useTooltips();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<ExperimentSummary[]>([]);
   const [total, setTotal] = useState(0);
@@ -164,7 +166,10 @@ export function ExperimentHistory({ refreshTrigger, onOpenActivations }: Props) 
                 className="secondary"
                 onClick={() => downloadExport({ format: "jsonl", ids: [...compareIds] })}
                 disabled={!canExportSelected}
-                title={canExportSelected ? "Export selected as JSONL" : "Select one or two rows to export"}
+                title={tooltipTitle(
+                  tooltipsEnabled,
+                  canExportSelected ? "Export selected as JSONL" : "Select one or two rows to export",
+                )}
               >
                 Export selected JSONL
               </button>
@@ -172,7 +177,10 @@ export function ExperimentHistory({ refreshTrigger, onOpenActivations }: Props) 
                 className="secondary"
                 onClick={() => downloadExport({ format: "csv", ids: [...compareIds] })}
                 disabled={!canExportSelected}
-                title={canExportSelected ? "Export selected as CSV" : "Select one or two rows to export"}
+                title={tooltipTitle(
+                  tooltipsEnabled,
+                  canExportSelected ? "Export selected as CSV" : "Select one or two rows to export",
+                )}
               >
                 Export selected CSV
               </button>
@@ -246,7 +254,10 @@ export function ExperimentHistory({ refreshTrigger, onOpenActivations }: Props) 
                             ) : item.has_activations ? (
                               <span
                                 className="badge activation-none"
-                                title="Captured at run time, but no live or saved tensor remains."
+                                title={tooltipTitle(
+                                  tooltipsEnabled,
+                                  "Captured at run time, but no live or saved tensor remains.",
+                                )}
                               >
                                 unavailable
                               </span>
@@ -423,13 +434,14 @@ export function ExperimentHistory({ refreshTrigger, onOpenActivations }: Props) 
                           }
                         }}
                         disabled={!detail.activation_source || !detail.captured_modules.length}
-                        title={
+                        title={tooltipTitle(
+                          tooltipsEnabled,
                           !detail.captured_modules.length
                             ? "No captured modules recorded."
                             : !detail.activation_source
                               ? "Activations were captured but are no longer available; enable snapshot persistence on future runs."
-                              : "Load the first captured module into the inspector"
-                        }
+                              : "Load the first captured module into the inspector",
+                        )}
                       >
                         Open activations
                       </button>

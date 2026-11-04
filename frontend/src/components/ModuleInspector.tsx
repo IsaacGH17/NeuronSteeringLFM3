@@ -1,4 +1,5 @@
 import type { ActivationResponse, ModuleDetail } from "../types";
+import { tooltipTitle, useTooltips } from "../ui/tooltips";
 import { ActivationView } from "./ActivationView";
 
 interface Props {
@@ -32,6 +33,8 @@ export function ModuleInspector({
   onSetSteeringTarget,
   onActivationQuery,
 }: Props) {
+  const { enabled: tooltipsEnabled } = useTooltips();
+
   return (
     <section className="panel inspector">
       <header className="panel-header">
@@ -76,11 +79,12 @@ export function ModuleInspector({
                 className="secondary small"
                 onClick={() => onSetSteeringTarget(detail.id)}
                 disabled={steeringTargetId === detail.id}
-                title={
+                title={tooltipTitle(
+                  tooltipsEnabled,
                   steeringTargetId === detail.id
                     ? "This module is already the steering target"
-                    : "Use this module for steered and sweep runs without changing what you inspect"
-                }
+                    : "Use this module for steered and sweep runs without changing what you inspect",
+                )}
               >
                 {steeringTargetId === detail.id ? "Steering target" : "Set as steering target"}
               </button>

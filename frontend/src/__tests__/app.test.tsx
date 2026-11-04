@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
+import { TOOLTIPS_STORAGE_KEY, TooltipProvider } from "../ui/tooltips";
 import {
   architectureFixture,
   baselineFixture,
@@ -44,6 +45,7 @@ const baselineId = "a".repeat(32);
 const steeredId = "b".repeat(32);
 
 beforeEach(() => {
+  window.localStorage.clear();
   api.getStatus.mockReset().mockResolvedValue(unloadedStatus);
   api.getDiagnostics.mockReset().mockResolvedValue(diagnosticsFixture);
   api.loadModel.mockReset().mockResolvedValue(loadedStatus);
@@ -78,9 +80,17 @@ async function loadModelAndSelectLayer(user: ReturnType<typeof userEvent.setup>)
   await screen.findByRole("heading", { name: "model.layers.0" });
 }
 
+function renderApp() {
+  return render(
+    <TooltipProvider>
+      <App />
+    </TooltipProvider>,
+  );
+}
+
 describe("App", () => {
   it("starts unloaded and disables generation", async () => {
-    render(<App />);
+    renderApp();
     expect(await screen.findByText("unloaded")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Load model" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Run baseline" })).toBeDisabled();
@@ -89,7 +99,7 @@ describe("App", () => {
 
   it("loads the model, discovers the architecture, and selects a real module", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
     await loadModelAndSelectLayer(user);
 
     expect(api.loadModel).toHaveBeenCalled();
@@ -101,7 +111,7 @@ describe("App", () => {
 
   it("automatically restores the architecture when the model is already loaded", async () => {
     api.getStatus.mockResolvedValue(loadedStatus);
-    render(<App />);
+    renderApp();
     expect(
       await screen.findByText("Lfm3ForCausalLM · 24 layers · hidden 2048"),
     ).toBeInTheDocument();
@@ -111,7 +121,7 @@ describe("App", () => {
 
   it("runs a baseline and displays the measured output", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
     await loadModelAndSelectLayer(user);
 
     await user.click(screen.getByRole("button", { name: "Run baseline" }));
@@ -130,7 +140,7 @@ describe("App", () => {
 
   it("runs the baseline + steered pair with the selected intervention", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
     await loadModelAndSelectLayer(user);
 
     await user.click(screen.getByRole("button", { name: "Set as steering target" }));
@@ -154,7 +164,7 @@ describe("App", () => {
 
   it("runs a strength sweep and renders its results", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
     await loadModelAndSelectLayer(user);
 
     await user.click(screen.getByRole("button", { name: "Set as steering target" }));
@@ -195,7 +205,7 @@ describe("App", () => {
     });
 
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
     await loadModelAndSelectLayer(user);
 
     await user.click(screen.getByLabelText("Capture activations for model.layers.0"));
@@ -210,7 +220,7 @@ describe("App", () => {
   it("reports load errors without pretending the model is ready", async () => {
     api.loadModel.mockRejectedValue(new api.ApiError("insufficient VRAM", 507));
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
 
     await user.click(screen.getByRole("button", { name: "Load model" }));
     expect(await screen.findByText("insufficient VRAM")).toBeInTheDocument();
@@ -221,10 +231,38 @@ describe("App", () => {
   it("reports generation errors in the steering panel", async () => {
     api.runBaseline.mockRejectedValue(new api.ApiError("model is not loaded", 409));
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
     await loadModelAndSelectLayer(user);
 
     await user.click(screen.getByRole("button", { name: "Run baseline" }));
     expect(await screen.findByText("model is not loaded")).toBeInTheDocument();
   });
+  it("opens and closes the help drawer with key concepts", async () => {
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(screen.getByRole("button", { name: "Help" }));
+    expect(screen.getByRole("dialog", { name: "Help & key concepts" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "The experiment loop" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Hooks and safety" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("toggles tooltips globally and persists the preference", async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await loadModelAndSelectLayer(user);
+
+    const toggle = screen.getByLabelText("Tooltips");
+    expect(toggle).toBeChecked();
+    expect(screen.getAllByTitle(/Output is \[batch/).length).toBeGreaterThan(0);
+
+    await user.click(toggle);
+    expect(toggle).not.toBeChecked();
+    expect(screen.queryAllByTitle(/Output is \[batch/)).toHaveLength(0);
+    expect(window.localStorage.getItem(TOOLTIPS_STORAGE_KEY)).toBe("false");
+  });
+
 });

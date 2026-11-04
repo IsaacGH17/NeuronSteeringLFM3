@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import type { ActivationResponse, HeatmapData, TokenInfo } from "../types";
+import { tooltipTitle, useTooltips } from "../ui/tooltips";
 
 interface Props {
   activation: ActivationResponse | null;
@@ -37,6 +38,7 @@ function Heatmap({
   onPick: (position: number, feature: number) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const { enabled: tooltipsEnabled } = useTooltips();
   const [hover, setHover] = useState<{
     position: number;
     feature: number;
@@ -113,7 +115,7 @@ function Heatmap({
         onMouseLeave={() => setHover(null)}
         onClick={handleClick}
       />
-      {hover && (
+      {hover && tooltipsEnabled && (
         <div className="heatmap-tooltip" style={{ left: hover.x + 12, top: hover.y + 12 }}>
           position {hover.position} · feature {hover.feature} · {formatValue(hover.value)}
         </div>
@@ -203,6 +205,7 @@ function Distribution({ activation }: { activation: ActivationResponse }) {
 }
 
 export function ActivationView({ activation, loading, error, onQuery }: Props) {
+  const { enabled: tooltipsEnabled } = useTooltips();
   const [featureInput, setFeatureInput] = useState("");
 
   useEffect(() => {
@@ -253,7 +256,10 @@ export function ActivationView({ activation, loading, error, onQuery }: Props) {
           <button
             key={token.index}
             className={`token-chip ${token.phase} ${token.index === activation.position ? "selected" : ""}`}
-            title={`#${token.index} · token ${token.token_id} · ${token.phase}`}
+            title={tooltipTitle(
+              tooltipsEnabled,
+              `#${token.index} · token ${token.token_id} · ${token.phase}`,
+            )}
             onClick={() => onQuery({ position: token.index, feature: activation.feature_series.feature })}
           >
             <span className="token-index">{token.index}</span>

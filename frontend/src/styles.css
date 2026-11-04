@@ -1521,6 +1521,196 @@ button.small {
   font-size: 11px;
 }
 
+.tooltip-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.tooltip-toggle input {
+  accent-color: var(--accent);
+}
+
+.topbar-button {
+  padding: 6px 10px;
+}
+
+.help-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(10, 9, 6, 0.62);
+}
+
+.help-drawer {
+  width: min(560px, 100vw);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-left: 1px solid var(--border-strong);
+  box-shadow: -24px 0 60px rgba(0, 0, 0, 0.45);
+}
+
+.help-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.help-kicker {
+  margin: 0 0 4px;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.help-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.help-body {
+  padding: 18px 20px 48px;
+  overflow: auto;
+}
+
+.help-lede {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.help-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 16px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.help-toc a {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 11px;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.help-toc a:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.help-section {
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  margin-top: 18px;
+}
+
+.help-section:first-of-type {
+  border-top: 0;
+  margin-top: 8px;
+  padding-top: 0;
+}
+
+.help-section h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.help-section p,
+.help-section li {
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text);
+}
+
+.help-section p {
+  margin: 0 0 10px;
+}
+
+.help-section ul,
+.help-section ol {
+  margin: 0 0 10px;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.help-section code {
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 11.5px;
+  background: #100e0b;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.help-section strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.help-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.help-list div {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 12px;
+}
+
+.help-list dt {
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 11px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding-top: 2px;
+}
+
+.help-list dd {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+@media (max-width: 600px) {
+  .help-list div {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .help-drawer {
+    width: 100vw;
+  }
+}
+
 @media (max-width: 1400px) {
   .activation-columns {
     grid-template-columns: 1fr;

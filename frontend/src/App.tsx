@@ -16,7 +16,9 @@ import { ArchitectureExplorer } from "./components/ArchitectureExplorer";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
 import { ExperimentHistory } from "./components/ExperimentHistory";
 import { GenerationPanel } from "./components/GenerationPanel";
+import { HelpPanel } from "./components/HelpPanel";
 import { ModuleInspector } from "./components/ModuleInspector";
+import { useTooltips } from "./ui/tooltips";
 import type {
   ActivationResponse,
   Architecture,
@@ -69,6 +71,8 @@ export default function App() {
   const [capturedIds, setCapturedIds] = useState<Set<string>>(() => new Set());
   const [steeringTargetId, setSteeringTargetId] = useState<string | null>(null);
   const [compareWith, setCompareWith] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const { enabled: tooltipsEnabled, setEnabled: setTooltipsEnabled } = useTooltips();
   const [historyRefresh, setHistoryRefresh] = useState(0);
   const selectionRequest = useRef(0);
   const activationRequest = useRef(0);
@@ -325,6 +329,21 @@ export default function App() {
               {status.device} · {status.dtype}
             </span>
           )}
+          <label className="tooltip-toggle">
+            <input
+              type="checkbox"
+              checked={tooltipsEnabled}
+              onChange={(event) => setTooltipsEnabled(event.target.checked)}
+            />
+            <span>Tooltips</span>
+          </label>
+          <button
+            className="secondary topbar-button"
+            onClick={() => setHelpOpen(true)}
+            aria-haspopup="dialog"
+          >
+            Help
+          </button>
           {!status.loaded && (
             <button className="primary" onClick={handleLoad} disabled={loadingModel || status.state === "loading"}>
               {loadingModel || status.state === "loading" ? "Loading…" : "Load model"}
@@ -381,6 +400,7 @@ export default function App() {
         />
       </main>
 
+      <HelpPanel open={helpOpen} onClose={() => setHelpOpen(false)} />
       <ExperimentHistory refreshTrigger={historyRefresh} onOpenActivations={handleOpenHistoricalActivations} />
       <DiagnosticsPanel diagnostics={diagnostics} />
     </div>

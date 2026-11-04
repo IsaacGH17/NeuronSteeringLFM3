@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { Architecture, ModuleNode } from "../types";
+import { tooltipTitle, useTooltips } from "../ui/tooltips";
 
 interface Props {
   architecture: Architecture | null;
@@ -50,6 +51,7 @@ function TreeRow({
   capturedIds: Set<string>;
 }) {
   const [hovered, setHovered] = useState(false);
+  const { enabled: tooltipsEnabled } = useTooltips();
   const isExpanded = expanded.has(node.id) || query !== "";
   const hasChildren = node.children.length > 0;
   const visibleChildren = isExpanded ? node.children.filter((child) => subtreeMatches(child, query)) : [];
@@ -78,9 +80,15 @@ function TreeRow({
         >
           {isExpanded ? "▾" : "▸"}
         </button>
-        <span className={`dot ${node.supports_steering ? "steerable" : ""}`} title={node.steering_reason ?? ""} />
+        <span
+          className={`dot ${node.supports_steering ? "steerable" : ""}`}
+          title={tooltipTitle(tooltipsEnabled, node.steering_reason)}
+        />
         {capturedIds.has(node.id) && (
-          <span className="capture-indicator" title="Activations captured in the latest run">
+          <span
+            className="capture-indicator"
+            title={tooltipTitle(tooltipsEnabled, "Activations captured in the latest run")}
+          >
             cap
           </span>
         )}

@@ -11,6 +11,8 @@ A local-first research and educational tool: explore the model's internal activa
 - **Steering and generation** — baseline vs. steered generation using forward hooks; editable prompt, steering targets, and strengths.
 - **Multi-strength sweeps and controls** — run several strengths against one baseline, optionally adding a seeded random-feature control that matches the intervention magnitude.
 - **Experiment history and export** — every run is saved as a JSONL metadata record; inspect, compare, reopen, and export selected or all runs as JSONL/CSV. Activation tensors stay ephemeral unless snapshot persistence is enabled.
+- **Built-in help** — a Help drawer explains activations, hidden dimensions, α, run modes, controls, reproducibility, hooks, storage, and limitations.
+- **Tooltip control** — a topbar toggle enables or disables native and heatmap tooltips; the preference persists in local storage.
 
 Steering is inference-only via forward hooks. Hooks are installed per experiment and removed in `finally`; zero strength exactly reproduces the baseline. Experiment metadata survives backend restarts in `data/experiments.jsonl`; activation tensors are held in an in-memory store (oldest evicted) and are only written to `data/activations/` when persistence is explicitly enabled.
 
@@ -144,7 +146,7 @@ Verified on the reference machine unless noted:
 - Baseline vs. steered pair runs, sweep runs with repeats, and seeded random-feature controls.
 - JSONL experiment persistence across restarts, list/filter/pagination, detail/compare views, and JSONL/CSV export (including formula-injection protection).
 - Optional activation snapshot persistence and restoration within the byte budget.
-- Backend suite: 74 passed, 3 skipped offline; 3 passed against the real checkpoint. Frontend suite: 65 tests across 7 files; production build passes.
+- Backend suite: 74 passed, 3 skipped offline; 3 passed against the real checkpoint. Frontend suite: 70 tests across 8 files; production build passes.
 - End-to-end HTTP smoke test: FastAPI served the built frontend, loaded the real model, returned the architecture, ran a captured baseline, and read it back from history.
 
 ## Repository layout
