@@ -67,6 +67,7 @@ export default function App() {
   const [activationLoading, setActivationLoading] = useState(false);
   const [activationError, setActivationError] = useState<string | null>(null);
   const [capturedIds, setCapturedIds] = useState<Set<string>>(() => new Set());
+  const [steeringTargetId, setSteeringTargetId] = useState<string | null>(null);
   const [compareWith, setCompareWith] = useState<string | null>(null);
   const [historyRefresh, setHistoryRefresh] = useState(0);
   const selectionRequest = useRef(0);
@@ -123,6 +124,7 @@ export default function App() {
     try {
       const next = await apiLoadModel();
       setStatus(next);
+      setSteeringTargetId(null);
       await Promise.all([loadArchitecture(), refreshDiagnostics()]);
     } catch (error) {
       setLoadError(errorMessage(error));
@@ -323,9 +325,11 @@ export default function App() {
               {status.device} · {status.dtype}
             </span>
           )}
-          <button className="primary" onClick={handleLoad} disabled={loadingModel || status.loaded}>
-            {loadingModel || status.state === "loading" ? "Loading…" : status.loaded ? "Model loaded" : "Load model"}
-          </button>
+          {!status.loaded && (
+            <button className="primary" onClick={handleLoad} disabled={loadingModel || status.state === "loading"}>
+              {loadingModel || status.state === "loading" ? "Loading…" : "Load model"}
+            </button>
+          )}
         </div>
       </header>
 
@@ -348,6 +352,8 @@ export default function App() {
           activation={activation}
           activationLoading={activationLoading}
           activationError={activationError}
+          steeringTargetId={steeringTargetId}
+          onSetSteeringTarget={setSteeringTargetId}
           onActivationQuery={(query) => {
             if (activation) {
               void loadActivation(activation.experiment_id, activation.module_id, {
@@ -365,7 +371,9 @@ export default function App() {
           sweepResult={sweepResult}
           sweepError={sweepError}
           error={generationError}
-          captureModuleId={selectedId && detail?.supports_steering ? selectedId : null}
+          selectedSteerableId={selectedId && detail?.supports_steering ? selectedId : null}
+          steeringTargetId={steeringTargetId}
+          onSetSteeringTarget={setSteeringTargetId}
           hiddenSize={architecture?.hidden_size ?? null}
           onRun={handleRunBaseline}
           onRunSteered={handleRunSteered}

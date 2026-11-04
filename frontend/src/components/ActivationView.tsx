@@ -23,8 +23,8 @@ function tokenLabel(token: TokenInfo): string {
 function colorFor(value: number, maxAbs: number): string {
   const normalized = maxAbs === 0 ? 0 : Math.max(-1, Math.min(1, value / maxAbs));
   const intensity = Math.sqrt(Math.abs(normalized));
-  const base = [11, 17, 28];
-  const target = normalized >= 0 ? [251, 113, 133] : [56, 189, 248];
+  const base = [16, 14, 11];
+  const target = normalized >= 0 ? [227, 176, 94] : [144, 168, 180];
   const rgb = base.map((channel, index) => Math.round(channel + (target[index] - channel) * intensity));
   return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
 }
@@ -63,7 +63,7 @@ function Heatmap({
     if (rows === 0 || columns === 0) return;
     const cellWidth = canvas.width / columns;
     const cellHeight = canvas.height / rows;
-    context.fillStyle = "#0b111c";
+    context.fillStyle = "#100e0b";
     context.fillRect(0, 0, canvas.width, canvas.height);
     for (let row = 0; row < rows; row += 1) {
       for (let column = 0; column < columns; column += 1) {

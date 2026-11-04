@@ -24,7 +24,7 @@ Steering is inference-only via forward hooks. Hooks are installed per experiment
 
 The backend is the sole authority on tensor shapes, module names, and results; the frontend never fabricates model data. When `frontend/dist` exists, FastAPI serves the built frontend at `/`.
 
-Development is phased (see `PLAN.md`); Phases 1–5 are implemented: model exploration, baseline generation, activation capture/visualization, steering, and experiment history/sweeps/export.
+Development is phased (see `PLAN.md`); Phases 1–7 are implemented: model exploration, baseline generation, activation capture/visualization, steering, experiment history/sweeps/export, validation, and documentation. Tested features are listed at the end of this file.
 
 ## Requirements
 
@@ -59,8 +59,20 @@ The history file is append-only JSONL. Requests may set `persist_activations` ex
 cd frontend
 npm install
 npm run dev       # Vite dev server, proxies /api to 127.0.0.1:8000
+npm run typecheck # tsc --noEmit
+npm test          # Vitest + Testing Library component/integration tests
 npm run build     # typecheck + build -> frontend/dist (served by FastAPI)
 ```
+
+### Example experiment
+
+1. Start the backend (`uv run uvicorn backend.app.main:app`) and frontend (`npm run dev`), open `http://localhost:5173`, and click **Load model**.
+2. In the architecture explorer, open `model.layers.22.feed_forward` and select it. The inspector shows its real class and parameter shapes, and offers **Set as steering target**.
+3. In the generation panel, enable **Capture activations**, keep greedy decoding (`temperature = 0`), keep the **Baseline** mode, and click **Run baseline**. The center panel now shows the measured `[tokens, 2048]` tensor with a heatmap, distribution, and top dimensions.
+4. Click **Set as steering target** in the inspector, switch to **Steered**, pick a hidden dimension (for example 500), set α to a negative value (for example −12), and click **Run baseline + steered**. Both runs share the same prompt, settings, and seed; the center panel shows the labeled `steered − baseline` difference.
+5. Optionally switch to **Sweep** and run several strengths (for example `-20,-10,0,10,20`) with a seeded random-feature control. Every run appears in the experiment history, where you can inspect, compare, reopen persisted activations, and export JSONL/CSV.
+
+Zero strength must reproduce the baseline exactly. A single changed response is not evidence that a dimension controls a behavior — use repeated prompts, multiple strengths, and controls before drawing conclusions.
 
 ### Real-model integration (optional)
 
@@ -71,6 +83,24 @@ LFM3_RUN_INTEGRATION=1 uv run pytest backend/tests/test_integration_lfm3.py
 ```
 
 Weights are cached in `~/.cache/huggingface`.
+
+### Performance measurement
+
+```bash
+uv run python -m backend.scripts.benchmark_model --max-new-tokens 32
+uv run python -m backend.scripts.benchmark_model --device cpu --max-new-tokens 8
+```
+
+Measured on the reference machine (RX 7600, ROCm 7.2, BF16, greedy, `enable_thinking=False`):
+
+| Run | Latency | Rate |
+|-----|---------|------|
+| baseline, 8 tokens | 0.30 s | ~27 tok/s |
+| baseline, 32 requested (20 generated before EOS) | 0.73 s | ~27 tok/s |
+| baseline + activation capture | 0.73 s | ~27 tok/s |
+| steered α=−12 + capture | 0.77 s | ~27 tok/s |
+
+Model load takes ~6.5–9 s once cached; peak allocated VRAM is 3.49 GB (~3.53 GB reserved). Enabling `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1` gave no measurable gain (~28 vs ~27 tok/s), so it is not required.
 
 ## API overview
 
@@ -84,7 +114,7 @@ Core endpoints (all under `/api`):
 
 ## Notes and limitations
 
-- First generation includes ~5–6 s of ROCm/SDPA warmup; later tokens are faster.
+- First generation includes ~5–6 s of ROCm/SDPA warmup; steady-state decoding is ~27 tok/s on the reference RX 7600. The benchmark script warms up before timing.
 - On ROCm, benign stderr noise (`(null): No such file or directory`) may appear at import.
 - The ROCm torch stack is pinned in `pyproject.toml` via the `pytorch-rocm` uv index; keep those as declared direct deps.
 - Sweeps run sequentially and can take minutes; there is no cancellation/streaming progress yet.
@@ -92,14 +122,41 @@ Core endpoints (all under `/api`):
 - CSV export prefixes spreadsheet formula leaders (`=`, `+`, `@`) in text cells to prevent CSV injection. Numeric columns are exported raw.
 - Don't report a steering result from a single changed response — behavioral claims need experimental evidence.
 
+## Troubleshooting
+
+- **`torch` or `transformers` import failures / wrong Python**: use `uv run …` from the repository root. The project pins Python 3.13; the system Python (≥ 3.14) has no compatible torch wheels.
+- **Model load fails with a device error**: the default is `auto` (`cuda` when ROCm/CUDA is visible, otherwise CPU). Force CPU with `LFM3_DEVICE=cpu`. If the checkpoint cannot be fetched, confirm network/HF access and that `~/.cache/huggingface` is writable.
+- **GPU out of memory**: lower `max_new_tokens`, shorten the prompt, and capture fewer modules. The reference 8 GB card uses 3.49 GB for weights/activations at the tested settings.
+- **`(null): No such file or directory` on stderr**: benign ROCm import noise; it does not affect inference.
+- **Activation route returns 404**: the run captured no tensors, the tensor was evicted (8 experiments / 256 MB), or the backend restarted without snapshot persistence. Re-run with capture enabled and optionally enable **Persist activation snapshot**.
+- **Port already in use**: set `LFM3_PORT` for the backend and update the Vite proxy if needed; Vite uses 5173 by default.
+- **Frontend shows API errors in the browser but the backend works**: build the frontend (`npm run build`) when serving through FastAPI, or run `npm run dev` so Vite proxies `/api` to the backend.
+- **Tests cannot find weights**: the default suites are offline by design; only the optional integration test needs the cached checkpoint.
+
+## Tested features
+
+Verified on the reference machine unless noted:
+
+- Real 24-layer LFM3-1.7B architecture discovery (16 attention/conv/MLP layer layout, 2048 hidden size).
+- Baseline chat generation with the model's chat template and `enable_thinking=False`.
+- Activation capture for selected hidden-state modules with token alignment, heatmap data, histogram, stats, top dimensions, and feature series.
+- Single-dimension steering with positive/negative strengths, exact zero-strength baseline reproduction, and guaranteed hook removal.
+- Baseline vs. steered pair runs, sweep runs with repeats, and seeded random-feature controls.
+- JSONL experiment persistence across restarts, list/filter/pagination, detail/compare views, and JSONL/CSV export (including formula-injection protection).
+- Optional activation snapshot persistence and restoration within the byte budget.
+- Backend suite: 74 passed, 3 skipped offline; 3 passed against the real checkpoint. Frontend suite: 65 tests across 7 files; production build passes.
+- End-to-end HTTP smoke test: FastAPI served the built frontend, loaded the real model, returned the architecture, ran a captured baseline, and read it back from history.
+
 ## Repository layout
 
 ```
 backend/
   app/            FastAPI app, settings, schemas, model manager, vendors
+  scripts/        benchmark_model.py (real-model latency/VRAM measurement)
   tests/          pytest suite (synthetic models + optional real integration)
 frontend/
   src/            React/TypeScript three-panel workspace + history/sweep panels
+  src/__tests__/  Vitest component/integration tests
   dist/           built assets served by FastAPI
 data/             experiment JSONL and optional activation snapshots (gitignored)
 PLAN.md           full design spec and phased plan

@@ -1,22 +1,23 @@
 :root {
   color-scheme: dark;
-  --bg: #0a0d14;
-  --panel: #111725;
-  --panel-2: #161e2e;
-  --border: #232d42;
-  --border-strong: #33415c;
-  --text: #d9dfeb;
-  --muted: #8792a8;
-  --accent: #5eead4;
-  --accent-2: #38bdf8;
-  --warn: #fbbf24;
-  --error: #f87171;
-  --ok: #34d399;
-  --conv: #60a5fa;
-  --full: #c084fc;
-  --sliding: #fb923c;
-  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --bg: #14120e;
+  --panel: #1a1712;
+  --panel-2: #211d16;
+  --border: #342e24;
+  --border-strong: #4b4335;
+  --text: #e9e2d4;
+  --muted: #9d9483;
+  --accent: #e3b05e;
+  --accent-2: #b6c19a;
+  --warn: #d9a441;
+  --error: #d97c6a;
+  --ok: #8eae7a;
+  --conv: #90a8b4;
+  --full: #d38a63;
+  --sliding: #a9b07a;
+  font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 14px;
+  line-height: 1.5;
 }
 
 * {
@@ -31,8 +32,11 @@ body,
 }
 
 body {
-  background: radial-gradient(circle at 20% -10%, #16233a 0%, var(--bg) 45%);
+  background-color: var(--bg);
+  background-image: radial-gradient(1100px 520px at 12% -12%, rgba(227, 176, 94, 0.06), transparent 62%);
   color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 button,
@@ -44,6 +48,31 @@ textarea {
 
 button {
   cursor: pointer;
+}
+
+::selection {
+  background: rgba(227, 176, 94, 0.3);
+}
+
+::placeholder {
+  color: #6f6759;
+  opacity: 1;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid var(--bg);
+  border-radius: 999px;
 }
 
 button:disabled {
@@ -63,21 +92,30 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 12px 20px;
+  padding: 11px 20px;
   border-bottom: 1px solid var(--border);
-  background: rgba(10, 13, 20, 0.85);
-  backdrop-filter: blur(12px);
+  background: var(--bg);
 }
 
 .brand {
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.brand::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
 }
 
 .brand span {
-  color: var(--accent);
-  font-weight: 500;
+  color: var(--muted);
+  font-weight: 400;
 }
 
 .status-group {
@@ -88,7 +126,7 @@ button:disabled {
 }
 
 .model-id {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 12px;
   color: var(--muted);
 }
@@ -97,32 +135,33 @@ button:disabled {
   border: 1px solid var(--border-strong);
   border-radius: 999px;
   padding: 3px 10px;
-  font-size: 11px;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
 .status-pill.loaded {
-  border-color: rgba(52, 211, 153, 0.5);
+  border-color: rgba(142, 174, 122, 0.5);
   color: var(--ok);
-  background: rgba(52, 211, 153, 0.08);
+  background: rgba(142, 174, 122, 0.08);
 }
 
 .status-pill.loading {
-  border-color: rgba(251, 191, 36, 0.5);
+  border-color: rgba(217, 164, 65, 0.5);
   color: var(--warn);
 }
 
 .status-pill.error {
-  border-color: rgba(248, 113, 113, 0.5);
+  border-color: rgba(217, 124, 106, 0.5);
   color: var(--error);
 }
 
 .workspace {
   display: grid;
   grid-template-columns: minmax(280px, 1fr) minmax(380px, 1.35fr) minmax(340px, 1fr);
-  gap: 12px;
-  padding: 12px 16px;
+  gap: 10px;
+  padding: 10px 14px;
   min-height: 0;
 }
 
@@ -130,9 +169,9 @@ button:disabled {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 6px;
   overflow: hidden;
 }
 
@@ -147,10 +186,12 @@ button:disabled {
 
 .panel-header h2 {
   margin: 0;
-  font-size: 13px;
-  letter-spacing: 0.1em;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--text);
+  color: var(--muted);
 }
 
 .subtle {
@@ -170,7 +211,7 @@ button:disabled {
 .segmented {
   display: inline-flex;
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -184,16 +225,16 @@ button:disabled {
 }
 
 .segmented button.active {
-  background: rgba(94, 234, 212, 0.12);
+  background: rgba(227, 176, 94, 0.12);
   color: var(--accent);
 }
 
 .search {
   margin: 10px 14px 4px;
   padding: 8px 10px;
-  background: #0b111c;
+  background: #100e0b;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   outline: none;
 }
 
@@ -205,7 +246,7 @@ button:disabled {
   flex: 1;
   overflow: auto;
   padding: 6px 8px 10px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 12px;
 }
 
@@ -214,18 +255,18 @@ button:disabled {
   align-items: center;
   gap: 6px;
   padding: 4px 6px;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
 }
 
 .tree-row:hover {
-  background: rgba(56, 189, 248, 0.07);
+  background: rgba(182, 193, 154, 0.07);
 }
 
 .tree-row.selected {
-  background: rgba(94, 234, 212, 0.13);
+  background: rgba(227, 176, 94, 0.13);
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
@@ -247,13 +288,12 @@ button:disabled {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #3b465e;
+  background: #4a4134;
   flex-shrink: 0;
 }
 
 .dot.steerable {
   background: var(--accent);
-  box-shadow: 0 0 6px rgba(94, 234, 212, 0.7);
 }
 
 .tree-name {
@@ -277,10 +317,11 @@ button:disabled {
 .badge {
   display: inline-block;
   padding: 1px 6px;
-  border-radius: 5px;
-  font-size: 9px;
+  border-radius: 3px;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   border: 1px solid var(--border-strong);
   color: var(--muted);
   flex-shrink: 0;
@@ -288,20 +329,20 @@ button:disabled {
 
 .badge.layer-conv {
   color: var(--conv);
-  border-color: rgba(96, 165, 250, 0.4);
-  background: rgba(96, 165, 250, 0.08);
+  border-color: rgba(144, 168, 180, 0.4);
+  background: rgba(144, 168, 180, 0.08);
 }
 
 .badge.layer-full_attention {
   color: var(--full);
-  border-color: rgba(192, 132, 252, 0.4);
-  background: rgba(192, 132, 252, 0.08);
+  border-color: rgba(211, 138, 99, 0.4);
+  background: rgba(211, 138, 99, 0.08);
 }
 
 .badge.layer-sliding_attention {
   color: var(--sliding);
-  border-color: rgba(251, 146, 60, 0.4);
-  background: rgba(251, 146, 60, 0.08);
+  border-color: rgba(169, 176, 122, 0.4);
+  background: rgba(169, 176, 122, 0.08);
 }
 
 .legend {
@@ -326,20 +367,20 @@ button:disabled {
 .layer-card {
   text-align: left;
   padding: 10px;
-  border-radius: 9px;
+  border-radius: 6px;
   border: 1px solid var(--border);
-  background: #0d131f;
-  transition: border-color 0.15s ease, transform 0.15s ease;
+  background: #17140f;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .layer-card:hover {
   border-color: var(--border-strong);
-  transform: translateY(-1px);
+  background: #1d1913;
 }
 
 .layer-card.selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px rgba(94, 234, 212, 0.3);
+  background: rgba(227, 176, 94, 0.06);
 }
 
 .layer-card-top {
@@ -349,7 +390,7 @@ button:disabled {
 }
 
 .layer-index {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   color: var(--muted);
   font-size: 12px;
 }
@@ -380,7 +421,7 @@ button:disabled {
 
 .module-title h3 {
   margin: 0;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 13px;
   font-weight: 500;
   overflow-wrap: anywhere;
@@ -388,8 +429,8 @@ button:disabled {
 
 .steerable-badge {
   color: var(--accent);
-  border-color: rgba(94, 234, 212, 0.4);
-  background: rgba(94, 234, 212, 0.08);
+  border-color: rgba(227, 176, 94, 0.4);
+  background: rgba(227, 176, 94, 0.08);
 }
 
 .muted-badge {
@@ -412,43 +453,45 @@ button:disabled {
 
 .meta-grid dd {
   margin: 3px 0 0;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 12px;
   overflow-wrap: anywhere;
 }
 
 .callout {
   padding: 9px 11px;
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 12px;
   line-height: 1.45;
   margin-bottom: 16px;
 }
 
 .callout.ok {
-  border: 1px solid rgba(94, 234, 212, 0.25);
-  background: rgba(94, 234, 212, 0.06);
-  color: #a7f3e4;
+  border: 1px solid rgba(227, 176, 94, 0.25);
+  background: rgba(227, 176, 94, 0.06);
+  color: #f0d7a8;
 }
 
 .callout.muted {
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(233, 226, 212, 0.03);
   color: var(--muted);
 }
 
 h4 {
   margin: 16px 0 8px;
-  font-size: 11px;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 10px;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   color: var(--muted);
 }
 
 .data-table {
   width: 100%;
   border-collapse: collapse;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 11px;
 }
 
@@ -472,11 +515,11 @@ h4 {
 
 .chip {
   padding: 4px 9px;
-  border-radius: 999px;
+  border-radius: 4px;
   border: 1px solid var(--border-strong);
   background: transparent;
   font-size: 11px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   color: var(--text);
 }
 
@@ -489,7 +532,7 @@ h4 {
   margin-top: 18px;
   padding: 12px 14px;
   border: 1px dashed var(--border-strong);
-  border-radius: 9px;
+  border-radius: 6px;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.5;
@@ -507,9 +550,26 @@ h4 {
 
 .form {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 12px;
-  padding: 14px 16px;
+  min-height: 0;
+  padding: 14px 16px 4px;
+  overflow: auto;
+}
+
+.generation-footer {
+  flex: 0 0 auto;
+  padding: 0 16px 12px;
+}
+
+.generation-footer .error-banner {
+  margin: 8px 0 0;
+}
+
+.results {
+  flex: 0 1 auto;
+  min-height: 0;
   overflow: auto;
 }
 
@@ -526,11 +586,11 @@ h4 {
 .form textarea,
 .form input[type="number"] {
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid var(--border);
-  background: #0b111c;
+  background: #100e0b;
   outline: none;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 12px;
   text-transform: none;
   letter-spacing: 0;
@@ -539,13 +599,150 @@ h4 {
 
 .form textarea:focus,
 .form input:focus {
-  border-color: var(--border-strong);
+  border-color: var(--accent);
 }
 
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.mode-bar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+
+.mode-bar button {
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  padding: 8px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.mode-bar button:hover {
+  color: var(--text);
+}
+
+.mode-bar button.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #1a140b;
+}
+
+.mode-hint {
+  margin: -2px 0 2px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+fieldset.control-card,
+fieldset.target-card {
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(16, 14, 11, 0.42);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+fieldset.control-card legend,
+fieldset.target-card legend {
+  padding: 0 6px;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+fieldset.target-card {
+  border-color: var(--border-strong);
+}
+
+fieldset.target-card.ready {
+  border-color: rgba(227, 176, 94, 0.35);
+  background: rgba(227, 176, 94, 0.05);
+}
+
+fieldset.target-card.missing {
+  border-style: dashed;
+}
+
+.target-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.target-module {
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 12px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.control-card .checkbox {
+  margin-top: 2px;
+}
+
+.steering-card {
+  background: rgba(182, 193, 154, 0.05);
+}
+
+.field-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--warn);
+}
+
+.run-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+
+.run-button {
+  min-width: 184px;
+  padding: 10px 16px;
+  font-size: 13px;
+}
+
+.run-status {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.results:empty {
+  display: none;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 2px;
 }
 
 .checkbox {
@@ -559,23 +756,24 @@ h4 {
 
 .primary {
   padding: 8px 14px;
-  border-radius: 8px;
-  border: 1px solid rgba(94, 234, 212, 0.45);
-  background: linear-gradient(180deg, rgba(94, 234, 212, 0.2), rgba(56, 189, 248, 0.14));
-  color: #d8fff9;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #1a140b;
   font-size: 12px;
   font-weight: 600;
 }
 
 .primary:hover:not(:disabled) {
-  border-color: var(--accent);
+  background: #ecc27a;
+  border-color: #ecc27a;
 }
 
 .steering-box {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 6px;
   padding: 10px 12px;
-  background: rgba(56, 189, 248, 0.04);
+  background: rgba(182, 193, 154, 0.04);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -599,7 +797,7 @@ h4 {
 
 .strength-slider input[type="range"] {
   width: 100%;
-  accent-color: #94e2d9;
+  accent-color: #e3b05e;
 }
 
 .button-row {
@@ -618,7 +816,7 @@ h4 {
   margin: 0 0 10px;
   font-size: 12px;
   color: var(--accent-2);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
 
 .comparison-columns {
@@ -630,7 +828,7 @@ h4 {
 .comparison-columns .result {
   border-top: none;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 6px;
 }
 
 .condition-label {
@@ -645,16 +843,16 @@ h4 {
 .warning-banner {
   margin: 10px 16px;
   padding: 9px 11px;
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 12px;
   line-height: 1.45;
   white-space: pre-wrap;
 }
 
 .error-banner {
-  border: 1px solid rgba(248, 113, 113, 0.4);
-  background: rgba(248, 113, 113, 0.08);
-  color: #fecaca;
+  border: 1px solid rgba(217, 124, 106, 0.4);
+  background: rgba(217, 124, 106, 0.08);
+  color: #f0c4b9;
 }
 
 .error-banner.global {
@@ -662,9 +860,9 @@ h4 {
 }
 
 .warning-banner {
-  border: 1px solid rgba(251, 191, 36, 0.35);
-  background: rgba(251, 191, 36, 0.07);
-  color: #fde68a;
+  border: 1px solid rgba(217, 164, 65, 0.35);
+  background: rgba(217, 164, 65, 0.07);
+  color: #eed7a5;
 }
 
 .result {
@@ -677,7 +875,7 @@ h4 {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 11px;
   color: var(--accent-2);
 }
@@ -685,10 +883,10 @@ h4 {
 .output {
   margin: 10px 0;
   padding: 12px;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid var(--border);
-  background: #0b111c;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  background: #100e0b;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 12px;
   line-height: 1.55;
   white-space: pre-wrap;
@@ -698,7 +896,7 @@ h4 {
 .diagnostics,
 .history {
   border-top: 1px solid var(--border);
-  background: rgba(10, 13, 20, 0.92);
+  background: rgba(20, 18, 14, 0.92);
   max-height: 42vh;
   overflow: auto;
 }
@@ -720,7 +918,7 @@ h4 {
 
 .diagnostics-toggle:hover,
 .history-toggle:hover {
-  background: rgba(56, 189, 248, 0.05);
+  background: rgba(182, 193, 154, 0.05);
 }
 
 .diagnostics-body,
@@ -760,7 +958,7 @@ h4 {
   padding: 5px 8px;
   border-radius: 6px;
   border: 1px solid var(--border);
-  background: #0b111c;
+  background: #100e0b;
   color: var(--text);
   font: inherit;
 }
@@ -812,11 +1010,11 @@ h4 {
 }
 
 .history-table tbody tr:hover {
-  background: rgba(56, 189, 248, 0.05);
+  background: rgba(182, 193, 154, 0.05);
 }
 
 .history-table tbody tr.selected {
-  background: rgba(94, 234, 212, 0.1);
+  background: rgba(227, 176, 94, 0.1);
 }
 
 .history-table tbody tr.compared {
@@ -829,32 +1027,32 @@ h4 {
 
 .badge.condition-baseline {
   color: var(--accent);
-  border-color: rgba(94, 234, 212, 0.4);
-  background: rgba(94, 234, 212, 0.08);
+  border-color: rgba(227, 176, 94, 0.4);
+  background: rgba(227, 176, 94, 0.08);
 }
 
 .badge.condition-steered {
   color: var(--accent-2);
-  border-color: rgba(56, 189, 248, 0.4);
-  background: rgba(56, 189, 248, 0.08);
+  border-color: rgba(182, 193, 154, 0.4);
+  background: rgba(182, 193, 154, 0.08);
 }
 
 .badge.condition-control {
   color: var(--warn);
-  border-color: rgba(251, 191, 36, 0.4);
-  background: rgba(251, 191, 36, 0.08);
+  border-color: rgba(217, 164, 65, 0.4);
+  background: rgba(217, 164, 65, 0.08);
 }
 
 .badge.condition-strength {
   color: var(--full);
-  border-color: rgba(192, 132, 252, 0.4);
-  background: rgba(192, 132, 252, 0.08);
+  border-color: rgba(211, 138, 99, 0.4);
+  background: rgba(211, 138, 99, 0.08);
 }
 
 .badge.activation-live {
   color: var(--ok);
-  border-color: rgba(52, 211, 153, 0.4);
-  background: rgba(52, 211, 153, 0.08);
+  border-color: rgba(142, 174, 122, 0.4);
+  background: rgba(142, 174, 122, 0.08);
 }
 
 .badge.activation-none {
@@ -873,9 +1071,9 @@ h4 {
   min-height: 0;
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 6px;
   padding: 12px 14px;
-  background: rgba(11, 17, 28, 0.5);
+  background: rgba(16, 14, 11, 0.5);
 }
 
 .history-detail-head {
@@ -902,10 +1100,10 @@ h4 {
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid var(--border);
-  background: rgba(56, 189, 248, 0.06);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  background: rgba(182, 193, 154, 0.06);
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 12px;
   margin-bottom: 12px;
 }
@@ -930,7 +1128,7 @@ h4 {
 }
 
 .mono {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
 
 .history-actions {
@@ -976,7 +1174,7 @@ h4 {
   margin: 0 0 10px;
   font-size: 12px;
   color: var(--accent-2);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
 
 .sweep-table {
@@ -1032,18 +1230,18 @@ button.small {
 
 .capture-indicator {
   padding: 0 4px;
-  border-radius: 4px;
-  background: rgba(56, 189, 248, 0.16);
-  border: 1px solid rgba(56, 189, 248, 0.45);
+  border-radius: 3px;
+  background: rgba(182, 193, 154, 0.16);
+  border: 1px solid rgba(182, 193, 154, 0.45);
   color: var(--accent-2);
-  font-size: 8px;
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   flex-shrink: 0;
 }
 
 .layer-card.captured {
-  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(182, 193, 154, 0.35);
 }
 
 .activation-view {
@@ -1086,32 +1284,32 @@ button.small {
   padding: 4px 6px;
   border-radius: 6px;
   border: 1px solid var(--border);
-  background: #0b111c;
+  background: #100e0b;
   color: var(--text);
   flex-shrink: 0;
 }
 
 .token-chip.prompt {
-  border-color: rgba(96, 165, 250, 0.3);
+  border-color: rgba(144, 168, 180, 0.3);
 }
 
 .token-chip.generated {
-  border-color: rgba(251, 146, 60, 0.35);
+  border-color: rgba(169, 176, 122, 0.35);
 }
 
 .token-chip.selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px rgba(94, 234, 212, 0.4);
+  background: rgba(227, 176, 94, 0.08);
 }
 
 .token-index {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 9px;
   color: var(--muted);
 }
 
 .token-text {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 11px;
   white-space: pre;
   overflow: hidden;
@@ -1122,9 +1320,9 @@ button.small {
 .heatmap-wrap {
   position: relative;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
-  background: #0b111c;
+  background: #100e0b;
 }
 
 .heatmap-canvas {
@@ -1140,8 +1338,8 @@ button.small {
   padding: 4px 7px;
   border-radius: 5px;
   border: 1px solid var(--border-strong);
-  background: rgba(10, 13, 20, 0.95);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  background: rgba(20, 18, 14, 0.95);
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 10px;
   white-space: nowrap;
   z-index: 2;
@@ -1160,7 +1358,7 @@ button.small {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 10px;
   color: var(--muted);
 }
@@ -1169,7 +1367,7 @@ button.small {
   width: 110px;
   height: 8px;
   border-radius: 999px;
-  background: linear-gradient(90deg, rgb(56, 189, 248), rgb(11, 17, 28), rgb(251, 113, 133));
+  background: linear-gradient(90deg, rgb(182, 193, 154), rgb(16, 14, 11), rgb(227, 176, 94));
 }
 
 .feature-chart {
@@ -1177,19 +1375,19 @@ button.small {
   width: 100%;
   height: auto;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: #0b111c;
+  border-radius: 6px;
+  background: #100e0b;
   cursor: pointer;
 }
 
 .chart-zero {
-  stroke: rgba(135, 146, 168, 0.35);
+  stroke: rgba(157, 148, 131, 0.35);
   stroke-width: 1;
   stroke-dasharray: 4 4;
 }
 
 .chart-cursor {
-  stroke: rgba(94, 234, 212, 0.6);
+  stroke: rgba(227, 176, 94, 0.6);
   stroke-width: 1;
 }
 
@@ -1202,7 +1400,7 @@ button.small {
 
 .chart-label {
   fill: var(--muted);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 9px;
 }
 
@@ -1227,16 +1425,16 @@ button.small {
 .feature-controls input {
   width: 120px;
   padding: 7px 9px;
-  border-radius: 7px;
+  border-radius: 6px;
   border: 1px solid var(--border);
-  background: #0b111c;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  background: #100e0b;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 12px;
 }
 
 .secondary {
   padding: 7px 12px;
-  border-radius: 7px;
+  border-radius: 6px;
   border: 1px solid var(--border-strong);
   background: transparent;
   color: var(--text);
@@ -1271,8 +1469,8 @@ button.small {
   padding: 4px 8px;
   border-radius: 5px;
   border: 1px solid transparent;
-  background: #0b111c;
-  font-family: "JetBrains Mono", monospace;
+  background: #100e0b;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 11px;
   color: var(--text);
 }
@@ -1282,7 +1480,7 @@ button.small {
 }
 
 .top-dim.selected {
-  border-color: rgba(94, 234, 212, 0.5);
+  border-color: rgba(227, 176, 94, 0.5);
   color: var(--accent);
 }
 
@@ -1291,12 +1489,12 @@ button.small {
   width: 100%;
   height: auto;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: #0b111c;
+  border-radius: 6px;
+  background: #100e0b;
 }
 
 .distribution-bar {
-  fill: rgba(56, 189, 248, 0.65);
+  fill: rgba(182, 193, 154, 0.65);
 }
 
 .distribution-bar:hover {
@@ -1319,7 +1517,7 @@ button.small {
 
 .stats-list dd {
   margin: 2px 0 0;
-  font-family: "JetBrains Mono", monospace;
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 11px;
 }
 

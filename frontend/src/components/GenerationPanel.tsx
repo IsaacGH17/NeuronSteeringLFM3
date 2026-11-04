@@ -15,7 +15,9 @@ interface Props {
   sweepResult: SweepResponse | null;
   sweepError: string | null;
   error: string | null;
-  captureModuleId: string | null;
+  selectedSteerableId: string | null;
+  steeringTargetId: string | null;
+  onSetSteeringTarget: (moduleId: string) => void;
   hiddenSize: number | null;
   onRun: (
     prompt: string,
@@ -47,6 +49,26 @@ interface Props {
   }) => void;
 }
 
+type Mode = "baseline" | "steered" | "sweep";
+
+const MODES: Record<Mode, { label: string; runLabel: string; hint: string }> = {
+  baseline: {
+    label: "Baseline",
+    runLabel: "Run baseline",
+    hint: "One unmodified generation. Use it as the reference for everything else.",
+  },
+  steered: {
+    label: "Steered",
+    runLabel: "Run baseline + steered",
+    hint: "Runs a baseline and a steered copy with the same prompt, settings, and seed.",
+  },
+  sweep: {
+    label: "Sweep",
+    runLabel: "Run sweep",
+    hint: "Runs one shared baseline plus a steered run for each strength and an optional random control.",
+  },
+};
+
 const DEFAULT_PROMPT = "Explain what a transformer activation is in two sentences.";
 const DEFAULT_STRENGTHS = "-20,-10,0,10,20";
 const STRENGTH_LIMIT = 49.5;
@@ -59,12 +81,15 @@ export function GenerationPanel({
   sweepResult,
   sweepError,
   error,
-  captureModuleId,
+  selectedSteerableId,
+  steeringTargetId,
+  onSetSteeringTarget,
   hiddenSize,
   onRun,
   onRunSteered,
   onRunSweep,
 }: Props) {
+  const [mode, setMode] = useState<Mode>("baseline");
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [system, setSystem] = useState("");
   const [maxNewTokens, setMaxNewTokens] = useState(128);
@@ -77,7 +102,6 @@ export function GenerationPanel({
   const [featureIndex, setFeatureIndex] = useState(0);
   const [strength, setStrength] = useState(0);
 
-  // Sweep state
   const [sweepFeatureIndex, setSweepFeatureIndex] = useState(0);
   const [strengthsText, setStrengthsText] = useState(DEFAULT_STRENGTHS);
   const [includeControl, setIncludeControl] = useState(false);
@@ -92,6 +116,20 @@ export function GenerationPanel({
     }
   }, [sweepResult, sweepError]);
 
+  const featureMax = hiddenSize !== null ? hiddenSize - 1 : 2047;
+  const clampFeature = (value: number) =>
+    Math.max(0, Math.min(featureMax, Math.round(Number.isFinite(value) ? value : 0)));
+  const clampStrength = (value: number) =>
+    Math.max(-STRENGTH_LIMIT, Math.min(STRENGTH_LIMIT, Number.isFinite(value) ? value : 0));
+
+  const clampedFeature = clampFeature(featureIndex);
+  const clampedSweepFeature = clampFeature(sweepFeatureIndex);
+  const clampedStrength = clampStrength(strength);
+  const featureClamped = clampedFeature !== Math.round(Number.isFinite(featureIndex) ? featureIndex : 0);
+  const sweepFeatureClamped =
+    clampedSweepFeature !== Math.round(Number.isFinite(sweepFeatureIndex) ? sweepFeatureIndex : 0);
+  const strengthClamped = clampedStrength !== strength;
+
   const buildSettings = (): GenerationSettings => ({
     max_new_tokens: Math.max(1, Math.min(4096, Math.round(maxNewTokens))),
     temperature,
@@ -104,7 +142,7 @@ export function GenerationPanel({
     promptText: prompt,
     systemText: system.trim() === "" ? null : system,
     settings: buildSettings(),
-    captures: captureEnabled && captureModuleId ? [captureModuleId] : [],
+    captures: captureEnabled && selectedSteerableId ? [selectedSteerableId] : [],
     persistActivations,
   });
 
@@ -115,20 +153,14 @@ export function GenerationPanel({
   };
 
   const submitSteered = () => {
-    if (!prompt.trim() || disabled || running) return;
-    if (!captureModuleId) return;
-    const clampedFeature = Math.max(
-      0,
-      Math.min(hiddenSize !== null ? hiddenSize - 1 : Number.MAX_SAFE_INTEGER, Math.round(featureIndex)),
-    );
-    const clampedStrength = Math.max(-STRENGTH_LIMIT, Math.min(STRENGTH_LIMIT, strength));
+    if (!prompt.trim() || disabled || running || !steeringTargetId) return;
     const { promptText, systemText, settings, captures, persistActivations: persist } = sharedArgs();
     onRunSteered(
       promptText,
       systemText,
       settings,
       {
-        module_id: captureModuleId,
+        module_id: steeringTargetId,
         feature_index: clampedFeature,
         strength: Number(clampedStrength.toFixed(6)),
       },
@@ -156,373 +188,439 @@ export function GenerationPanel({
   };
 
   const submitSweep = () => {
-    if (!prompt.trim() || disabled || sweepRunning) return;
-    if (!captureModuleId) return;
+    if (!prompt.trim() || disabled || sweepRunning || !steeringTargetId) return;
     const { strengths, error: parseError } = parseStrengths();
     if (parseError) {
       setSweepLocalError(parseError);
       return;
     }
     setSweepLocalError(null);
-    const clampedFeature = Math.max(
-      0,
-      Math.min(hiddenSize !== null ? hiddenSize - 1 : Number.MAX_SAFE_INTEGER, Math.round(sweepFeatureIndex)),
-    );
     const clampedRepeats = Math.max(1, Math.min(3, Math.round(repeats)));
-    const controlSeedValue = Number.isFinite(Number(controlSeed)) && controlSeed.trim() !== "" ? Number(controlSeed) : null;
+    const controlSeedValue =
+      Number.isFinite(Number(controlSeed)) && controlSeed.trim() !== "" ? Number(controlSeed) : null;
     setSweepRunning(true);
     onRunSweep({
       prompt,
       system: system.trim() === "" ? null : system,
       settings: buildSettings(),
-      module_id: captureModuleId,
-      feature_index: clampedFeature,
+      module_id: steeringTargetId,
+      feature_index: clampedSweepFeature,
       strengths,
       include_control: includeControl,
       control_seed: controlSeedValue,
       repeats: clampedRepeats,
-      capture_module_ids: captureEnabled && captureModuleId ? [captureModuleId] : [],
+      capture_module_ids: captureEnabled && selectedSteerableId ? [selectedSteerableId] : [],
       persist_activations: persistActivations,
     });
   };
 
-  const featureMax = hiddenSize !== null ? hiddenSize - 1 : 2047;
-  const steeringReady = Boolean(captureModuleId) && !disabled && !running;
-  const sweepReady = Boolean(captureModuleId) && !disabled && !running && !sweepRunning;
+  const runCurrent = () => {
+    if (mode === "baseline") submit();
+    else if (mode === "steered") submitSteered();
+    else submitSweep();
+  };
+
+  const promptReady = prompt.trim().length > 0;
+  const targetReady = Boolean(steeringTargetId);
+  const busy = running || (mode === "sweep" && sweepRunning);
+  const canRun = !disabled && promptReady && !busy && (mode === "baseline" || targetReady);
+  const runLabel = busy ? (mode === "sweep" ? "Running sweep…" : "Generating…") : MODES[mode].runLabel;
+  const statusText = disabled
+    ? "Load the model to enable generation."
+    : !promptReady
+      ? "Enter a prompt to run."
+      : mode !== "baseline" && !targetReady
+        ? "Set a steering target to run this mode."
+        : busy
+          ? mode === "sweep"
+            ? "Sweeping sequentially. Larger sweeps can take several minutes."
+            : "Generation in progress."
+          : "Ready.";
 
   return (
     <section className="panel generation">
       <header className="panel-header">
         <div>
           <h2>Steering and generation</h2>
-          <p className="subtle">Baseline and steered runs reuse the same prompt and settings.</p>
+          <p className="subtle">Pick a mode, confirm the target, then run one explicit experiment.</p>
         </div>
       </header>
 
       <div className="form">
-        <label>
-          <span>System instruction</span>
-          <textarea
-            rows={2}
-            value={system}
-            placeholder="Optional"
-            onChange={(event) => setSystem(event.target.value)}
-          />
-        </label>
-        <label>
-          <span>Prompt</span>
-          <textarea rows={5} value={prompt} onChange={(event) => setPrompt(event.target.value)} />
-        </label>
-
-        <div className="form-grid">
-          <label>
-            <span>Max new tokens</span>
-            <input
-              type="number"
-              min={1}
-              max={4096}
-              value={maxNewTokens}
-              onChange={(event) => setMaxNewTokens(Number(event.target.value))}
-            />
-          </label>
-          <label>
-            <span>Temperature</span>
-            <input
-              type="number"
-              min={0}
-              max={2}
-              step={0.1}
-              value={temperature}
-              onChange={(event) => setTemperature(Number(event.target.value))}
-            />
-          </label>
-          <label>
-            <span>Top-p</span>
-            <input
-              type="number"
-              min={0}
-              max={1}
-              step={0.05}
-              value={topP}
-              onChange={(event) => setTopP(Number(event.target.value))}
-            />
-          </label>
-          <label>
-            <span>Seed</span>
-            <input
-              type="number"
-              placeholder="random"
-              value={seed}
-              onChange={(event) => setSeed(event.target.value)}
-            />
-          </label>
+        <div className="mode-bar" role="group" aria-label="Experiment mode">
+          {(Object.keys(MODES) as Mode[]).map((key) => (
+            <button
+              key={key}
+              type="button"
+              className={mode === key ? "active" : ""}
+              aria-pressed={mode === key}
+              onClick={() => setMode(key)}
+            >
+              {MODES[key].label}
+            </button>
+          ))}
         </div>
+        <p className="mode-hint" aria-live="polite">
+          {MODES[mode].hint}
+        </p>
 
-        <label className="checkbox">
-          <input
-            type="checkbox"
-            checked={enableThinking}
-            onChange={(event) => setEnableThinking(event.target.checked)}
-          />
-          <span>Enable thinking (off by default)</span>
-        </label>
-
-        <div className="steering-box">
-          <h4>Steering (inference-only hook)</h4>
-          <p className="subtle">
-            Target module:{" "}
-            {captureModuleId ? (
-              <code>{captureModuleId}</code>
-            ) : (
-              "select a steerable module in the architecture explorer"
-            )}
-          </p>
-          <div className="form-grid">
-            <label>
-              <span>Feature index (max {featureMax})</span>
-              <input
-                type="number"
-                min={0}
-                max={featureMax}
-                value={featureIndex}
-                onChange={(event) => setFeatureIndex(Number(event.target.value))}
-              />
-            </label>
-            <label>
-              <span>Strength (numeric)</span>
-              <input
-                type="number"
-                min={-STRENGTH_LIMIT}
-                max={STRENGTH_LIMIT}
-                step={0.5}
-                value={strength}
-                onChange={(event) => setStrength(Number(event.target.value))}
-              />
-            </label>
+        <fieldset className={`target-card ${targetReady ? "ready" : "missing"}`}>
+          <legend>Steering target</legend>
+          <div className="target-card-head">
+            <code className="target-module">{steeringTargetId ?? "No module selected"}</code>
+            <span className={`badge ${targetReady ? "steerable-badge" : "muted-badge"}`}>
+              {targetReady ? "set" : "not set"}
+            </span>
           </div>
-          <label className="strength-slider">
-            <span>Strength slider: {strength}</span>
-            <input
-              type="range"
-              min={-STRENGTH_LIMIT}
-              max={STRENGTH_LIMIT}
-              step={0.5}
-              value={strength}
-              onChange={(event) => setStrength(Number(event.target.value))}
+          <p className="subtle">
+            {mode === "baseline"
+              ? "Baseline runs ignore the steering target."
+              : targetReady
+                ? "Steered and sweep runs shift this module's output while you inspect any module you like."
+                : "Select a steerable module in the inspector, then set it as the target. Inspecting another module will not change it."}
+          </p>
+          {selectedSteerableId && selectedSteerableId !== steeringTargetId && (
+            <button
+              type="button"
+              className="secondary small"
+              onClick={() => onSetSteeringTarget(selectedSteerableId)}
+            >
+              Use inspected module
+            </button>
+          )}
+        </fieldset>
+
+        <fieldset className="control-card">
+          <legend>Prompt</legend>
+          <label>
+            <span>System instruction</span>
+            <textarea
+              rows={2}
+              value={system}
+              placeholder="Optional"
+              onChange={(event) => setSystem(event.target.value)}
             />
           </label>
-          <button
-            className="secondary"
-            onClick={() => setStrength(0)}
-            disabled={strength === 0}
-          >
-            Reset strength to 0
-          </button>
-        </div>
+          <label>
+            <span>Prompt</span>
+            <textarea rows={5} value={prompt} onChange={(event) => setPrompt(event.target.value)} />
+          </label>
+        </fieldset>
 
-        <label className="checkbox">
-          <input
-            type="checkbox"
-            checked={captureEnabled}
-            disabled={!captureModuleId}
-            onChange={(event) => setCaptureEnabled(event.target.checked)}
-          />
-          <span>
-            Capture activations{captureModuleId ? ` for ${captureModuleId}` : " (select a steerable module)"}
-          </span>
-        </label>
-
-        <label className="checkbox">
-          <input
-            type="checkbox"
-            checked={persistActivations}
-            onChange={(event) => setPersistActivations(event.target.checked)}
-          />
-          <span>Persist activation snapshot (saves tensor data to disk)</span>
-        </label>
-
-        <div className="steering-box sweep-box">
-          <h4>Strength sweep</h4>
-          <p className="subtle">
-            Run the same prompt across several strengths. Each strength and optional random control is compared against a shared baseline.
-          </p>
+        <fieldset className="control-card">
+          <legend>Generation settings</legend>
           <div className="form-grid">
             <label>
-              <span>Feature index (max {featureMax})</span>
-              <input
-                type="number"
-                min={0}
-                max={featureMax}
-                value={sweepFeatureIndex}
-                onChange={(event) => setSweepFeatureIndex(Number(event.target.value))}
-              />
-            </label>
-            <label>
-              <span>Repeats (1–3)</span>
+              <span>Max new tokens</span>
               <input
                 type="number"
                 min={1}
-                max={3}
-                value={repeats}
-                onChange={(event) => setRepeats(Number(event.target.value))}
+                max={4096}
+                value={maxNewTokens}
+                onChange={(event) => setMaxNewTokens(Number(event.target.value))}
+              />
+            </label>
+            <label>
+              <span>Temperature</span>
+              <input
+                type="number"
+                min={0}
+                max={2}
+                step={0.1}
+                value={temperature}
+                onChange={(event) => setTemperature(Number(event.target.value))}
+              />
+            </label>
+            <label>
+              <span>Top-p</span>
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={topP}
+                onChange={(event) => setTopP(Number(event.target.value))}
+              />
+            </label>
+            <label>
+              <span>Seed</span>
+              <input
+                type="number"
+                placeholder="random"
+                value={seed}
+                onChange={(event) => setSeed(event.target.value)}
               />
             </label>
           </div>
-          <label>
-            <span>Strengths (comma-separated, 1–9 values)</span>
+          <label className="checkbox">
             <input
-              type="text"
-              value={strengthsText}
-              placeholder="-20,-10,0,10,20"
-              onChange={(event) => setStrengthsText(event.target.value)}
+              type="checkbox"
+              checked={enableThinking}
+              onChange={(event) => setEnableThinking(event.target.checked)}
             />
+            <span>Enable thinking (off by default)</span>
+          </label>
+        </fieldset>
+
+        {mode === "steered" && (
+          <fieldset className="control-card steering-card">
+            <legend>Steering settings</legend>
+            <p className="subtle">
+              Shift one hidden dimension by α at every token. α=0 must reproduce the baseline exactly.
+            </p>
+            <div className="form-grid">
+              <label>
+                <span>Hidden dimension (0–{featureMax})</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={featureMax}
+                  value={featureIndex}
+                  onChange={(event) => setFeatureIndex(Number(event.target.value))}
+                />
+              </label>
+              <label>
+                <span>Strength α</span>
+                <input
+                  type="number"
+                  min={-STRENGTH_LIMIT}
+                  max={STRENGTH_LIMIT}
+                  step={0.5}
+                  value={strength}
+                  onChange={(event) => setStrength(Number(event.target.value))}
+                />
+              </label>
+            </div>
+            <label className="strength-slider">
+              <span>Strength slider: {strength}</span>
+              <input
+                type="range"
+                min={-STRENGTH_LIMIT}
+                max={STRENGTH_LIMIT}
+                step={0.5}
+                value={clampedStrength}
+                onChange={(event) => setStrength(Number(event.target.value))}
+              />
+            </label>
+            {featureClamped && (
+              <p className="field-note">Hidden dimension clamped to {clampedFeature}.</p>
+            )}
+            {strengthClamped && <p className="field-note">Strength clamped to {clampedStrength}.</p>}
+            <button type="button" className="secondary" onClick={() => setStrength(0)} disabled={strength === 0}>
+              Reset strength to 0
+            </button>
+          </fieldset>
+        )}
+
+        {mode === "sweep" && (
+          <fieldset className="control-card steering-card">
+            <legend>Sweep settings</legend>
+            <p className="subtle">
+              Each strength and optional random control is compared against one shared baseline.
+            </p>
+            <div className="form-grid">
+              <label>
+                <span>Hidden dimension (0–{featureMax})</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={featureMax}
+                  value={sweepFeatureIndex}
+                  onChange={(event) => setSweepFeatureIndex(Number(event.target.value))}
+                />
+              </label>
+              <label>
+                <span>Repeats (1–3)</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={3}
+                  value={repeats}
+                  onChange={(event) => setRepeats(Number(event.target.value))}
+                />
+              </label>
+            </div>
+            <label>
+              <span>Strengths α (comma-separated, 1–9 values)</span>
+              <input
+                type="text"
+                value={strengthsText}
+                placeholder="-20,-10,0,10,20"
+                onChange={(event) => setStrengthsText(event.target.value)}
+              />
+            </label>
+            {sweepFeatureClamped && (
+              <p className="field-note">Hidden dimension clamped to {clampedSweepFeature}.</p>
+            )}
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={includeControl}
+                onChange={(event) => setIncludeControl(event.target.checked)}
+              />
+              <span>Include random-feature control</span>
+            </label>
+            {includeControl && (
+              <label>
+                <span>Control seed (optional)</span>
+                <input
+                  type="number"
+                  placeholder="random"
+                  value={controlSeed}
+                  onChange={(event) => setControlSeed(event.target.value)}
+                />
+              </label>
+            )}
+            <p className="subtle">Sweeps run sequentially; larger sweeps can take several minutes.</p>
+          </fieldset>
+        )}
+
+        <fieldset className="control-card">
+          <legend>Data options</legend>
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={captureEnabled}
+              disabled={!selectedSteerableId}
+              onChange={(event) => setCaptureEnabled(event.target.checked)}
+            />
+            <span>
+              Capture activations
+              {selectedSteerableId ? ` for ${selectedSteerableId}` : " (inspect a hidden-state module)"}
+            </span>
           </label>
           <label className="checkbox">
             <input
               type="checkbox"
-              checked={includeControl}
-              onChange={(event) => setIncludeControl(event.target.checked)}
+              checked={persistActivations}
+              onChange={(event) => setPersistActivations(event.target.checked)}
             />
-            <span>Include random-feature control</span>
+            <span>Persist activation snapshot (saves tensor data to disk)</span>
           </label>
-          {includeControl && (
-            <label>
-              <span>Control seed (optional)</span>
-              <input
-                type="number"
-                placeholder="random"
-                value={controlSeed}
-                onChange={(event) => setControlSeed(event.target.value)}
-              />
-            </label>
-          )}
-          <button
-            className="primary"
-            onClick={submitSweep}
-            disabled={!sweepReady || !prompt.trim()}
-            title={captureModuleId ? "Run multi-strength sweep" : "Select a steerable module first"}
-          >
-            {sweepRunning ? "Running sweep…" : "Run strength sweep"}
-          </button>
-          {(sweepLocalError || sweepError) && (
-            <div className="error-banner">{sweepLocalError ?? sweepError}</div>
-          )}
-          <p className="subtle">Sweeps may take several minutes for many strengths or repeats.</p>
-        </div>
-
-        <div className="button-row">
-          <button className="primary" onClick={submit} disabled={disabled || running || !prompt.trim()}>
-            {running ? "Generating…" : "Run baseline"}
-          </button>
-          <button
-            className="primary"
-            onClick={submitSteered}
-            disabled={!steeringReady || !prompt.trim()}
-            title={captureModuleId ? "Run baseline + steered pair" : "Select a steerable module first"}
-          >
-            {running ? "Generating…" : "Run baseline + steered"}
-          </button>
-        </div>
-        {disabled && <p className="subtle">Load the model to enable generation.</p>}
+        </fieldset>
       </div>
 
-      {error && <div className="error-banner">{error}</div>}
-
-      {pair && (
-        <div className="comparison">
-          <h4>Baseline vs steered · hook: {pair.steered.steering?.module_id} · dim{" "}
-            {pair.steered.steering?.feature_index} · α {pair.steered.steering?.strength}</h4>
-          <div className="comparison-columns">
-            {(["baseline", "steered"] as const).map((condition) => {
-              const run = pair[condition];
-              return (
-                <div key={run.id} className="result">
-                  <h5 className="condition-label">{condition}</h5>
-                  <div className="result-meta">
-                    <span>{run.generated_tokens} tokens</span>
-                    <span>{run.duration_ms.toFixed(0)} ms</span>
-                    <span>{run.tokens_per_second?.toFixed(1) ?? "—"} tok/s</span>
-                    <span>{run.device}</span>
-                  </div>
-                  {run.warnings.map((warning) => (
-                    <div key={warning} className="warning-banner inline">
-                      {warning}
-                    </div>
-                  ))}
-                  <pre className="output">{run.output || "(empty output)"}</pre>
-                  <p className="subtle">
-                    run {run.id.slice(0, 8)} · prompt tokens: {run.prompt_tokens}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {!pair && result && (
-        <div className="result">
-          <div className="result-meta">
-            <span>{result.generated_tokens} tokens</span>
-            <span>{result.duration_ms.toFixed(0)} ms</span>
-            <span>{result.tokens_per_second?.toFixed(1) ?? "—"} tok/s</span>
-            <span>{result.device}</span>
-          </div>
-          {result.warnings.map((warning) => (
-            <div key={warning} className="warning-banner">
-              {warning}
-            </div>
-          ))}
-          <pre className="output">{result.output || "(empty output)"}</pre>
-          <p className="subtle">
-            prompt tokens: {result.prompt_tokens} · run {result.id.slice(0, 8)} · {result.model_id}
+      <div className="generation-footer">
+        <div className="run-bar">
+          <button className="primary run-button" onClick={runCurrent} disabled={!canRun}>
+            {runLabel}
+          </button>
+          <p className="run-status" aria-live="polite">
+            {statusText}
           </p>
         </div>
-      )}
 
-      {sweepResult && (
-        <div className="sweep-results">
-          <h4>
-            Sweep {sweepResult.sweep_id.slice(0, 8)} · {sweepResult.runs.length} run
-            {sweepResult.runs.length === 1 ? "" : "s"}
-          </h4>
-          {sweepResult.warnings.length > 0 && (
-            <div className="warning-banner">{sweepResult.warnings.join("; ")}</div>
-          )}
-          <table className="data-table sweep-table">
-            <thead>
-              <tr>
-                <th>Kind</th>
-                <th>Index</th>
-                <th>Repeat</th>
-                <th>Feature</th>
-                <th>Strength</th>
-                <th>Duration</th>
-                <th>Tok/s</th>
-                <th>Output</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sweepResult.runs.map((run) => (
-                <tr key={`${run.kind}-${run.sweep_index}-${run.repeat_index}`}>
-                  <td>
-                    <span className={`badge condition-${run.kind}`}>{run.kind}</span>
-                  </td>
-                  <td>{run.sweep_index}</td>
-                  <td>{run.repeat_index}</td>
-                  <td>{run.run.steering?.feature_index ?? "—"}</td>
-                  <td>{run.run.steering?.strength ?? "—"}</td>
-                  <td>{run.run.duration_ms.toFixed(0)} ms</td>
-                  <td>{run.run.tokens_per_second?.toFixed(1) ?? "—"}</td>
-                  <td>
-                    <SweepOutputCell run={run.run} />
-                  </td>
+        {error && (
+          <div className="error-banner" role="alert">
+            {error}
+          </div>
+        )}
+        {(sweepLocalError || sweepError) && (
+          <div className="error-banner" role="alert">
+            {sweepLocalError ?? sweepError}
+          </div>
+        )}
+      </div>
+
+      <div className="results" aria-live="polite">
+        {pair && (
+          <div className="comparison">
+            <h4>
+              Baseline vs steered · hook: {pair.steered.steering?.module_id} · dim{" "}
+              {pair.steered.steering?.feature_index} · α {pair.steered.steering?.strength}
+            </h4>
+            <div className="comparison-columns">
+              {(["baseline", "steered"] as const).map((condition) => {
+                const run = pair[condition];
+                return (
+                  <div key={run.id} className="result">
+                    <h5 className="condition-label">{condition}</h5>
+                    <div className="result-meta">
+                      <span>{run.generated_tokens} tokens</span>
+                      <span>{run.duration_ms.toFixed(0)} ms</span>
+                      <span>{run.tokens_per_second?.toFixed(1) ?? "—"} tok/s</span>
+                      <span>{run.device}</span>
+                    </div>
+                    {run.warnings.map((warning) => (
+                      <div key={warning} className="warning-banner inline">
+                        {warning}
+                      </div>
+                    ))}
+                    <pre className="output">{run.output || "(empty output)"}</pre>
+                    <p className="subtle">
+                      run {run.id.slice(0, 8)} · prompt tokens: {run.prompt_tokens}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {!pair && result && (
+          <div className="result">
+            <div className="result-meta">
+              <span>{result.generated_tokens} tokens</span>
+              <span>{result.duration_ms.toFixed(0)} ms</span>
+              <span>{result.tokens_per_second?.toFixed(1) ?? "—"} tok/s</span>
+              <span>{result.device}</span>
+            </div>
+            {result.warnings.map((warning) => (
+              <div key={warning} className="warning-banner">
+                {warning}
+              </div>
+            ))}
+            <pre className="output">{result.output || "(empty output)"}</pre>
+            <p className="subtle">
+              prompt tokens: {result.prompt_tokens} · run {result.id.slice(0, 8)} · {result.model_id}
+            </p>
+          </div>
+        )}
+
+        {sweepResult && (
+          <div className="sweep-results">
+            <h4>
+              Sweep {sweepResult.sweep_id.slice(0, 8)} · {sweepResult.runs.length} run
+              {sweepResult.runs.length === 1 ? "" : "s"}
+            </h4>
+            {sweepResult.warnings.length > 0 && (
+              <div className="warning-banner">{sweepResult.warnings.join("; ")}</div>
+            )}
+            <table className="data-table sweep-table">
+              <thead>
+                <tr>
+                  <th>Kind</th>
+                  <th>Index</th>
+                  <th>Repeat</th>
+                  <th>Feature</th>
+                  <th>Strength</th>
+                  <th>Duration</th>
+                  <th>Tok/s</th>
+                  <th>Output</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody>
+                {sweepResult.runs.map((run) => (
+                  <tr key={`${run.kind}-${run.sweep_index}-${run.repeat_index}`}>
+                    <td>
+                      <span className={`badge condition-${run.kind}`}>{run.kind}</span>
+                    </td>
+                    <td>{run.sweep_index}</td>
+                    <td>{run.repeat_index}</td>
+                    <td>{run.run.steering?.feature_index ?? "—"}</td>
+                    <td>{run.run.steering?.strength ?? "—"}</td>
+                    <td>{run.run.duration_ms.toFixed(0)} ms</td>
+                    <td>{run.run.tokens_per_second?.toFixed(1) ?? "—"}</td>
+                    <td>
+                      <SweepOutputCell run={run.run} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </section>
   );
 }
@@ -534,9 +632,7 @@ function SweepOutputCell({ run }: { run: BaselineResponse }) {
       <button className="secondary small" onClick={() => setExpanded((value) => !value)}>
         {expanded ? "Collapse" : "Show output"}
       </button>
-      {expanded && (
-        <pre className="output small">{run.output || "(empty output)"}</pre>
-      )}
+      {expanded && <pre className="output small">{run.output || "(empty output)"}</pre>}
     </div>
   );
 }

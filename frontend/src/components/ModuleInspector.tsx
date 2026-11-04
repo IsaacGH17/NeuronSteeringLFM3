@@ -10,6 +10,8 @@ interface Props {
   activation: ActivationResponse | null;
   activationLoading: boolean;
   activationError: string | null;
+  steeringTargetId: string | null;
+  onSetSteeringTarget: (moduleId: string) => void;
   onActivationQuery: (query: { feature?: number; position?: number }) => void;
 }
 
@@ -26,6 +28,8 @@ export function ModuleInspector({
   activation,
   activationLoading,
   activationError,
+  steeringTargetId,
+  onSetSteeringTarget,
   onActivationQuery,
 }: Props) {
   return (
@@ -67,6 +71,20 @@ export function ModuleInspector({
             <span className={`badge ${detail.supports_steering ? "steerable-badge" : "muted-badge"}`}>
               {detail.supports_steering ? "steerable" : "not steerable"}
             </span>
+            {detail.supports_steering && (
+              <button
+                className="secondary small"
+                onClick={() => onSetSteeringTarget(detail.id)}
+                disabled={steeringTargetId === detail.id}
+                title={
+                  steeringTargetId === detail.id
+                    ? "This module is already the steering target"
+                    : "Use this module for steered and sweep runs without changing what you inspect"
+                }
+              >
+                {steeringTargetId === detail.id ? "Steering target" : "Set as steering target"}
+              </button>
+            )}
           </div>
 
           <dl className="meta-grid">

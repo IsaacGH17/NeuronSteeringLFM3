@@ -10,7 +10,9 @@ Interactive GUI to inspect and steer activations of `LiquidAI/LFM3-1.7B` (PyTorc
 - Run anything: `uv run python -m ...` (never call system python; it has no torch)
 - Backend dev: `uv run uvicorn backend.app.main:app --reload` (host/port from `backend/app/core/settings.py`, env-overridable)
 - Frontend dev: `npm install` then `npm run dev` in `frontend/` (Vite proxies `/api` to `127.0.0.1:8000`)
+- Frontend tests: `npm test` in `frontend/` (Vitest + Testing Library, jsdom); `npm run test:watch` for watch mode
 - Frontend build: `npm run build` in `frontend/` (typecheck + Vite; output served by FastAPI at `/` when `frontend/dist` exists)
+- Benchmark: `uv run python -m backend.scripts.benchmark_model [--device cpu] [--max-new-tokens N]`
 - Real-model integration: `LFM3_RUN_INTEGRATION=1 uv run pytest backend/tests/test_integration_lfm3.py` (weights cached in `~/.cache/huggingface`)
 
 ## Environment (verified 2026-10-29)
@@ -64,7 +66,7 @@ Interactive GUI to inspect and steer activations of `LiquidAI/LFM3-1.7B` (PyTorc
 - `GET /api/experiments/{id}/activations/{module_id}?compare_with={other_id}` returns a difference view (`steered − baseline`, direction labeled, truncated to shared positions with a warning).
 - Hook ordering matters: capture hooks see steered tensors because steer contexts are entered before capture contexts in `generate_chat`.
 - Real-model smoke verified on the RX 7600: zero strength reproduces baseline exactly; α = −12 on `model.layers.22.feed_forward` dim 500 changed the actual output text.
-- Frontend right panel: steering box (feature index + strength numeric + slider + reset), "Run baseline + steered" button, side-by-side comparison with per-condition metadata; center panel shows the labeled difference tensor.
+- Frontend right panel: explicit baseline/steered/sweep mode, a decoupled steering-target card (set from the module inspector; inspection changes do not silently retarget), steering controls (hidden dimension + α + slider + reset), one contextual Run button, and side-by-side comparison with per-condition metadata; center panel shows the labeled difference tensor.
 
 ## Phase 5 status (implemented and verified)
 
@@ -73,12 +75,24 @@ Interactive GUI to inspect and steer activations of `LiquidAI/LFM3-1.7B` (PyTorc
 - Activation snapshots are optional: `persist_activations` per request (or `LFM3_PERSIST_ACTIVATIONS`) writes `.npz` under `data/activations/<id>.npz` (id validated as 32 hex chars; path containment checked on restore) and restores lazily into the in-memory `ActivationStore` only if it fits the byte budget.
 - Routes: `POST /api/experiments/sweep`, `GET /api/experiments` (filters `condition`/`sweep_id`/`module_id`, pagination), `GET /api/experiments/export?format=jsonl|csv&ids=` (export route declared before `/{id}`), `GET /api/experiments/{id}`. Activation GETs fall back to snapshots; a known run with no captures returns `[]` for the list route and 404 for the tensor route.
 - Sweeps: strengths 1-9, repeats 1-3, total runs <=31; seeded random-feature control excludes the target feature and matches the max magnitude/sign of the last strength; control runs actually apply their hook (`condition="control"`). Greedy repeats warn that outputs are identical; unseeded sampling repeats warn they are not reproducible.
-- Frontend: collapsible experiment-history panel (list/detail/compare/export, reopen available snapshots) and sweep controls/results in the generation panel; persist-snapshot checkbox sends an explicit boolean.
+- Frontend: collapsible experiment-history panel (list/detail/compare/export, reopen available snapshots) and sweep controls/results in the generation panel; persist-snapshot checkbox sends an explicit boolean. The generation panel now groups mode → steering target → prompt/settings → run, with aria-live status and visible clamping notes.
 - Tests: `backend/tests/test_experiments.py` covers persistence/restart, corrupt tail, filters/pagination, export content + CSV injection/numeric integrity, route ordering, sweep ordering/control/seed/warnings, snapshot save/restore/containment/size guard, and no-capture behavior.
+
+## Phase 6 status (implemented and verified)
+
+- Backend suite: `uv run pytest` → 74 passed, 3 skipped (integration skipped without the env flag). `LFM3_RUN_INTEGRATION=1 uv run pytest backend/tests/test_integration_lfm3.py` → 3 passed on the real checkpoint (architecture, baseline generation, activation capture).
+- Frontend suite: 7 Vitest files / 65 tests covering `api/client` request+error handling, architecture loading/search/collapse/layer view, module inspector states, activation token/feature/top-dimension interactions, generation/steering/sweep payloads and result rendering, history list/detail/compare/export/pagination, and full App load→select→baseline/steered/sweep/error flows. `npm run build` (tsc + Vite) passes.
+- `backend/scripts/benchmark_model.py` measures steady-state latency/VRAM. Reference RX 7600 (BF16, greedy): load ~6.5-9 s, ~27 tok/s for 8-32 tokens, capture/steering add no measurable cost, peak allocated 3.49 GB (3.53 GB reserved).
+- `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1` was tested: no meaningful speedup (~28 vs ~27 tok/s), so it is not enabled by default.
+- Frontend test env stubs `HTMLCanvasElement.getContext` (jsdom has no canvas backend); the heatmap drawing path is not asserted pixel-wise.
+
+## Phase 7 status (implemented and verified)
+
+- README now covers installation, launch (backend + frontend + production build), an example experiment workflow, real-model integration, benchmark numbers, API overview, known limitations, troubleshooting, and a tested-features summary. `PLAN.md` §17 Phase 7 is complete.
 
 ## Still open
 
 - ROCm path notably emits benign stderr noise (`(null): No such file or directory`) at import.
 - First real generation includes ~5-6 s of ROCm/SDPA warmup; later tokens are faster. Keep generation bounded (8 GB physical VRAM).
 - Sweeps run sequentially with no cancellation/streaming progress; document wall-time before large sweeps.
-- Frontend has no automated component tests yet (PLAN §15); Phase 6 work.
+- Canvas heatmap rendering is excluded from jsdom tests; verifying it requires a real browser.

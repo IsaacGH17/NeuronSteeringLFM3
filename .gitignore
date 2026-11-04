@@ -17,3 +17,6 @@ dist/
 
 # Environment
 .env
+
+# Tooling artifacts
+.impeccable/
