@@ -24,6 +24,8 @@ import { GenerationPanel } from "./components/GenerationPanel";
 import { InterpretDrawer } from "./components/InterpretDrawer";
 import { HelpPanel } from "./components/HelpPanel";
 import { ModuleInspector } from "./components/ModuleInspector";
+import { NeuronDrawer } from "./components/NeuronDrawer";
+import { NextTokenProbe } from "./components/NextTokenProbe";
 import { useTooltips } from "./ui/tooltips";
 import type {
   ActivationResponse,
@@ -37,6 +39,7 @@ import type {
   ModelStatus,
   ModuleDetail,
   ModulePreset,
+  ProbeSeed,
   PromptSuite,
   SteeringResponse,
   SteeringSpec,
@@ -48,6 +51,8 @@ function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
 }
+
+const DEFAULT_PROBE_PROMPT = "Explain what a transformer activation is in two sentences.";
 
 const INITIAL_STATUS: ModelStatus = {
   state: "unloaded",
@@ -85,6 +90,9 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [interpretOpen, setInterpretOpen] = useState(false);
   const [flowOpen, setFlowOpen] = useState(false);
+  const [probeOpen, setProbeOpen] = useState(false);
+  const [neuronsOpen, setNeuronsOpen] = useState(false);
+  const [probeSeed, setProbeSeed] = useState<ProbeSeed | null>(null);
   const [direction, setDirection] = useState<DirectionResponse | null>(null);
   const [suites, setSuites] = useState<PromptSuite[]>([]);
   const [batchJob, setBatchJob] = useState<BatchJob | null>(null);
@@ -418,6 +426,22 @@ export default function App() {
     setGenerationError(null);
   };
 
+  const handleOpenProbe = () => {
+    const steering: SteeringSpec | null =
+      direction && steeringTargetId
+        ? {
+            module_id: steeringTargetId,
+            strength: 1,
+            feature_index:
+              direction.components.length === 1 ? direction.components[0].feature_index : null,
+            components: direction.components,
+            normalization: "sigma",
+          }
+        : null;
+    setProbeSeed({ prompt: DEFAULT_PROBE_PROMPT, system: null, steering });
+    setProbeOpen(true);
+  };
+
   const layerModules = useMemo(
     () =>
       (architecture?.layer_overview ?? []).map((block) => ({
@@ -455,6 +479,20 @@ export default function App() {
             aria-haspopup="dialog"
           >
             Flow
+          </button>
+          <button
+            className="secondary topbar-button"
+            onClick={() => setNeuronsOpen(true)}
+            aria-haspopup="dialog"
+          >
+            Neurons
+          </button>
+          <button
+            className="secondary topbar-button"
+            onClick={handleOpenProbe}
+            aria-haspopup="dialog"
+          >
+            Probe
           </button>
           <button
             className="secondary topbar-button"
@@ -543,6 +581,23 @@ export default function App() {
           setFlowOpen(false);
         }}
         onExperimentRecorded={() => setHistoryRefresh((value) => value + 1)}
+        onProbeCluster={(payload) => {
+          setFlowOpen(false);
+          setProbeSeed(payload);
+          setProbeOpen(true);
+        }}
+      />
+      <NextTokenProbe
+        open={probeOpen}
+        disabled={!status.loaded}
+        seed={probeSeed}
+        onClose={() => setProbeOpen(false)}
+      />
+      <NeuronDrawer
+        open={neuronsOpen}
+        disabled={!status.loaded}
+        layers={layerModules}
+        onClose={() => setNeuronsOpen(false)}
       />
       <InterpretDrawer
         open={interpretOpen}

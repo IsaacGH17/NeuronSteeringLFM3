@@ -537,6 +537,150 @@ class PatchResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class PatchSweepRequest(BaseModel):
+    recipient_prompt: str = Field(min_length=1, max_length=32_000)
+    recipient_system: str | None = Field(default=None, max_length=8_000)
+    donor_prompt: str = Field(min_length=1, max_length=32_000)
+    donor_system: str | None = Field(default=None, max_length=8_000)
+    settings: GenerationSettings = Field(default_factory=GenerationSettings)
+    layer_indices: list[int] = Field(default_factory=list, max_length=24)
+    positions: list[int] = Field(default_factory=lambda: [-1], min_length=1, max_length=8)
+
+    @field_validator("recipient_prompt", "donor_prompt")
+    @classmethod
+    def _prompt_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("prompt must not be blank")
+        return value
+
+
+class PatchSweepCell(BaseModel):
+    layer_index: int
+    module_id: str
+    position: int
+    donor_position: int
+    patched_output: str
+    changed: bool
+    first_token_changed: bool
+    common_prefix_tokens: int
+    generated_tokens: int
+    warnings: list[str] = Field(default_factory=list)
+
+
+class PatchSweepResponse(BaseModel):
+    recipient_prompt: str
+    donor_prompt: str
+    baseline_output: str
+    donor_output: str
+    prompt_tokens: int
+    donor_prompt_tokens: int
+    layers: list[int]
+    positions: list[int]
+    cells: list[PatchSweepCell]
+    duration_ms: float
+    warnings: list[str] = Field(default_factory=list)
+
+
+class NeuronTop(BaseModel):
+    neuron: int
+    weight: float
+    mean_abs: float
+    sigma: float
+
+
+class NeuronCluster(BaseModel):
+    id: int
+    size: int
+    mass: float
+    cohesion: float
+    peak_position: int
+    top_neurons: list[NeuronTop]
+    profile: list[float]
+    profile_positions: list[int]
+
+
+class NeuronTraceRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=32_000)
+    system: str | None = Field(default=None, max_length=8_000)
+    settings: GenerationSettings = Field(default_factory=GenerationSettings)
+    layer_index: int = Field(default=16, ge=0)
+    cluster_k: int = Field(default=6, ge=2, le=12)
+    cluster_max_positions: int = Field(default=128, ge=16, le=512)
+
+    @field_validator("prompt")
+    @classmethod
+    def _prompt_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("prompt must not be blank")
+        return value
+
+
+class NeuronTraceResponse(BaseModel):
+    experiment_id: str
+    prompt: str
+    system: str | None = None
+    output: str
+    tokens: list[TokenInfo]
+    prompt_tokens: int
+    generated_tokens: int
+    layer_index: int
+    layer_type: str
+    intermediate_size: int
+    hidden_size: int
+    residual_rms: float
+    clusters: list[NeuronCluster]
+    top_neurons: list[NeuronTop]
+    assignments: list[int]
+    cluster_positions: int
+    warnings: list[str] = Field(default_factory=list)
+
+
+class NeuronComponent(BaseModel):
+    neuron: int = Field(ge=0)
+    weight: float = 1.0
+
+    @field_validator("weight")
+    @classmethod
+    def _weight_finite(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("weight must be finite")
+        return value
+
+
+class NeuronDelta(BaseModel):
+    neuron: int
+    delta: float
+
+
+class NeuronSteeringRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=32_000)
+    system: str | None = Field(default=None, max_length=8_000)
+    settings: GenerationSettings = Field(default_factory=GenerationSettings)
+    layer_index: int = Field(default=16, ge=0)
+    neurons: list[NeuronComponent] = Field(min_length=1, max_length=64)
+    alpha: float = Field(default=0.7, allow_inf_nan=False)
+
+    @field_validator("prompt")
+    @classmethod
+    def _prompt_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("prompt must not be blank")
+        return value
+
+
+class NeuronSteeringResponse(BaseModel):
+    layer_index: int
+    alpha: float
+    neurons: list[NeuronComponent]
+    direction_norm: float
+    residual_rms: float
+    deltas: list[NeuronDelta]
+    baseline: BaselineResponse
+    steered: BaselineResponse
+    duration_ms: float
+    warnings: list[str] = Field(default_factory=list)
+
+
 class SuiteCheck(BaseModel):
     """A verifiable expectation attached to a suite prompt."""
 
@@ -596,6 +740,7 @@ class FlowRequest(BaseModel):
     settings: GenerationSettings = Field(default_factory=GenerationSettings)
     cluster_k: int = Field(default=6, ge=2, le=12)
     cluster_max_positions: int = Field(default=128, ge=16, le=512)
+    include_ablation: bool = False
     persist_activations: bool | None = None
 
     @field_validator("prompt")
@@ -651,6 +796,7 @@ class FlowLayer(BaseModel):
     energy: list[float]
     delta: list[float]
     clusters: list[FlowCluster]
+    ablation_kl: float | None = None
 
 
 class FlowEdge(BaseModel):
@@ -675,6 +821,61 @@ class FlowResponse(BaseModel):
     cluster_k: int
     cluster_positions: int
     settings: GenerationSettings
+    warnings: list[str] = Field(default_factory=list)
+
+
+class NextTokenRequest(BaseModel):
+    """One forward at the last prompt token; no text is generated."""
+
+    prompt: str = Field(min_length=1, max_length=32_000)
+    system: str | None = Field(default=None, max_length=8_000)
+    enable_thinking: bool = False
+    top_k: int = Field(default=10, ge=1, le=50)
+    steering: SteeringSpec | None = None
+
+    @field_validator("prompt")
+    @classmethod
+    def _prompt_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("prompt must not be blank")
+        return value
+
+
+class TokenProbability(BaseModel):
+    token_id: int
+    text: str
+    probability: float
+
+
+class NextTokenDistribution(BaseModel):
+    tokens: list[TokenProbability]
+    entropy: float
+
+
+class NextTokenCandidate(BaseModel):
+    """A token in the union of the baseline and steered top-k lists."""
+
+    token_id: int
+    text: str
+    baseline_probability: float
+    steered_probability: float | None = None
+    delta: float | None = None
+
+
+class NextTokenResponse(BaseModel):
+    prompt: str
+    system: str | None = None
+    model_id: str
+    device: str
+    prompt_tokens: int
+    position: int
+    top_k: int
+    baseline: NextTokenDistribution
+    steered: NextTokenDistribution | None = None
+    candidates: list[NextTokenCandidate]
+    kl_divergence: float | None = None
+    steering: SteeringSpec | None = None
+    duration_ms: float
     warnings: list[str] = Field(default_factory=list)
 
 

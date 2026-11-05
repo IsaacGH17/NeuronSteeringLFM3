@@ -29,8 +29,16 @@ from backend.app.schemas.api import (
     LoadModelRequest,
     ModelStatus,
     ModuleDetail,
+    NeuronSteeringRequest,
+    NeuronSteeringResponse,
+    NeuronTraceRequest,
+    NeuronTraceResponse,
+    NextTokenRequest,
+    NextTokenResponse,
     PatchRequest,
     PatchResponse,
+    PatchSweepRequest,
+    PatchSweepResponse,
     SteeringRequest,
     SteeringResponse,
     SuiteListResponse,
@@ -54,6 +62,9 @@ from backend.app.services.model_loader import (
     ModelManager,
     ModelNotLoadedError,
 )
+from backend.app.services.neurons import steer_neuron_group, trace_neurons
+from backend.app.services.next_token import probe_next_token
+from backend.app.services.patch_sweep import run_patch_sweep
 from backend.app.services.patching import run_patch
 from backend.app.services.steering_engine import validate_steering_spec
 from backend.app.services.suites import list_suites
@@ -228,6 +239,17 @@ def flow(payload: FlowRequest, request: Request) -> FlowResponse:
         raise _fail(exc) from exc
 
 
+@router.post("/experiments/next-token", response_model=NextTokenResponse)
+def next_token(payload: NextTokenRequest, request: Request) -> NextTokenResponse:
+    """Read the next-token distribution after one forward, optionally steered."""
+    manager = get_manager(request)
+    _require_loaded(manager)
+    try:
+        return probe_next_token(manager, payload)
+    except (ModelNotLoadedError, torch.cuda.OutOfMemoryError, ValueError) as exc:
+        raise _fail(exc) from exc
+
+
 @router.post("/experiments/sweep", response_model=SweepResponse)
 def sweep(payload: SweepRequest, request: Request) -> SweepResponse:
     manager = get_manager(request)
@@ -387,6 +409,41 @@ def activation_patch(payload: PatchRequest, request: Request) -> PatchResponse:
     _require_loaded(manager)
     try:
         return run_patch(manager, payload)
+    except (ModelNotLoadedError, torch.cuda.OutOfMemoryError, ValueError) as exc:
+        raise _fail(exc) from exc
+
+
+@router.post("/experiments/neurons", response_model=NeuronTraceResponse)
+def neurons(payload: NeuronTraceRequest, request: Request) -> NeuronTraceResponse:
+    """Capture one layer's w2 intermediate and cluster its MLP neurons."""
+    manager = get_manager(request)
+    _require_loaded(manager)
+    try:
+        result, response = trace_neurons(manager, payload)
+        _record(result, request)
+        return response
+    except (ModelNotLoadedError, torch.cuda.OutOfMemoryError, ValueError) as exc:
+        raise _fail(exc) from exc
+
+
+@router.post("/experiments/neuron-steering", response_model=NeuronSteeringResponse)
+def neuron_steering(payload: NeuronSteeringRequest, request: Request) -> NeuronSteeringResponse:
+    """Steer a group of MLP neurons through the w2 intermediate."""
+    manager = get_manager(request)
+    _require_loaded(manager)
+    try:
+        return steer_neuron_group(manager, payload)
+    except (ModelNotLoadedError, torch.cuda.OutOfMemoryError, ValueError) as exc:
+        raise _fail(exc) from exc
+
+
+@router.post("/experiments/patch-sweep", response_model=PatchSweepResponse)
+def patch_sweep(payload: PatchSweepRequest, request: Request) -> PatchSweepResponse:
+    """Causal tracing over layers and prompt positions."""
+    manager = get_manager(request)
+    _require_loaded(manager)
+    try:
+        return run_patch_sweep(manager, payload)
     except (ModelNotLoadedError, torch.cuda.OutOfMemoryError, ValueError) as exc:
         raise _fail(exc) from exc
 

@@ -28,6 +28,7 @@ from backend.app.schemas.api import (
     FlowResponse,
     SteeringComponent,
 )
+from backend.app.services.ablation import compute_ablation_kl
 from backend.app.services.activation_store import StoredExperiment
 from backend.app.services.architecture_inspector import build_layer_overview
 from backend.app.services.generation import (
@@ -352,4 +353,16 @@ def trace_flow(
         captures=result.captures,
         warnings=result.response.warnings,
     )
-    return result, compute_flow(stored, request, model=model)
+    flow = compute_flow(stored, request, model=model)
+    if request.include_ablation:
+        values, ablation_warnings = compute_ablation_kl(
+            manager,
+            prompt=request.prompt,
+            system=request.system,
+            enable_thinking=request.settings.enable_thinking,
+            layer_ids=[block.module_id for block in overview],
+        )
+        for layer, value in zip(flow.layers, values, strict=True):
+            layer.ablation_kl = value
+        flow.warnings.extend(ablation_warnings)
+    return result, flow

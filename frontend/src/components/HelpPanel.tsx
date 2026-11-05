@@ -16,6 +16,9 @@ const TOPICS = [
   ["help-hooks", "Hooks and safety"],
   ["help-reading", "Reading results"],
   ["help-flow", "Live flow"],
+  ["help-probe", "Next-token probe"],
+  ["help-patch-sweep", "Patch sweep"],
+  ["help-neurons", "Neuron explorer"],
   ["help-data", "Capture and storage"],
   ["help-limits", "Limitations"],
 ] as const;
@@ -205,6 +208,59 @@ export function HelpPanel({ open, onClose }: Props) {
               inspect its top dimensions and steer the group in σ units. Clusters are descriptive, strand colors
               are per-layer ranks (not matched across layers), and an unchanged output after steering is a real
               result, not a failure of the tool.
+            </p>
+            <p>
+              <strong>Compare</strong> traces A and B and draws the Δ stream: ribbon width is |Δ residual write|,
+              teal means B writes more, orange means A writes more, and rings show |Δ ablation KL|. Ablation
+              importance skips a layer’s contribution while preserving the residual stream; it is the next-token
+              KL, not a change to the weights. Clusters are compared per trace and are not matched across A and B.
+            </p>
+          </section>
+
+          <section id="help-probe" className="help-section">
+            <h3>Next-token probe</h3>
+            <p>
+              The probe runs one forward over the prompt and reads the raw softmax at the last token. With a
+              steering spec it forwards the prompt again with the hooks installed, then shows the baseline
+              and steered top-k distributions, their KL divergence, and the entropy change. It does not
+              generate text and does not save a run.
+            </p>
+            <p>
+              Open it from the topbar, or select a cluster in <strong>Flow</strong> and press{" "}
+              <strong>Probe next token</strong>. Moving α re-probes after a short debounce, so the probe is a
+              quick way to scan a direction before spending a full generation on it.
+            </p>
+          </section>
+
+          <section id="help-patch-sweep" className="help-section">
+            <h3>Patch sweep</h3>
+            <p>
+              <strong>Interpret → Patch sweep</strong> runs causal tracing over layers and prompt
+              positions. The donor&apos;s activation at a layer/position replaces the recipient&apos;s
+              for the first forward only, then the recipient generates normally. The grid marks
+              unchanged (<code>=</code>), output changed (<code>≠</code>), and first-token flipped
+              (<code>⇄</code>) cells; click one to read its patched text.
+            </p>
+            <p>
+              The last prompt token is often the template tail, so a sweep there can be flat. Use a
+              custom position for the subject token. Each cell is one generation, so a sweep is capped
+              at 48 cells and is not saved to experiment history.
+            </p>
+          </section>
+
+          <section id="help-neurons" className="help-section">
+            <h3>Neuron explorer</h3>
+            <p>
+              The <strong>Neurons</strong> drawer works at the MLP <code>w2</code> intermediate:
+              7680 neurons per layer for LFM3-1.7B. It captures one layer during a real generation,
+              clusters neurons by their z-scored activation profiles, and draws the clusters as a
+              map grouped by cluster. Top neurons are listed with their signed weights.
+            </p>
+            <p>
+              Group steering adds δᵢ = α · residual_rms / ‖direction‖ · wᵢ to the w2 intermediate,
+              where the direction is the weighted sum of the neurons&apos; w2 columns times the
+              post-FFN norm weight. α = 0 reproduces the baseline. A changed output for one prompt
+              and one group is a hypothesis, not proof that the group controls the behaviour.
             </p>
           </section>
 

@@ -17,8 +17,16 @@ import type {
   LensResponse,
   ModelStatus,
   ModuleDetail,
+  NeuronSteeringRequest,
+  NeuronSteeringResponse,
+  NeuronTraceRequest,
+  NeuronTraceResponse,
+  NextTokenRequest,
+  NextTokenResponse,
   PatchRequest,
   PatchResponse,
+  PatchSweepRequest,
+  PatchSweepResponse,
   PromptSuite,
   SteeringResponse,
   SteeringSpec,
@@ -152,6 +160,27 @@ export function runFlow(payload: FlowRequest): Promise<FlowResponse> {
   });
 }
 
+export function runNextToken(payload: NextTokenRequest): Promise<NextTokenResponse> {
+  return request<NextTokenResponse>("/experiments/next-token", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function runNeuronTrace(payload: NeuronTraceRequest): Promise<NeuronTraceResponse> {
+  return request<NeuronTraceResponse>("/experiments/neurons", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function runNeuronSteering(payload: NeuronSteeringRequest): Promise<NeuronSteeringResponse> {
+  return request<NeuronSteeringResponse>("/experiments/neuron-steering", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export interface ExperimentListParams {
   condition?: "baseline" | "steered" | "control";
   sweep_id?: string;
@@ -263,6 +292,13 @@ export function runLens(payload: LensRequest): Promise<LensResponse> {
 
 export function runPatch(payload: PatchRequest): Promise<PatchResponse> {
   return request<PatchResponse>("/experiments/patch", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function runPatchSweep(payload: PatchSweepRequest): Promise<PatchSweepResponse> {
+  return request<PatchSweepResponse>("/experiments/patch-sweep", {
     method: "POST",
     body: JSON.stringify(payload),
   });

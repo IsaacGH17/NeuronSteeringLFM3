@@ -20,6 +20,9 @@ describe("HelpPanel", () => {
     expect(screen.getByRole("heading", { name: "Controls and sweeps" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Reproducibility" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Live flow" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Next-token probe" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Patch sweep" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Neuron explorer" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalled();

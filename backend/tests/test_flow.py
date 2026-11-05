@@ -40,6 +40,7 @@ def test_flow_trace_returns_every_layer(client: TestClient):
     assert body["prompt_tokens"] > 0
     assert body["global_max_norm"] > 0
     assert any("final generated token" in warning for warning in body["warnings"])
+    assert all(layer["ablation_kl"] is None for layer in body["layers"])
 
     for index, layer in enumerate(body["layers"]):
         assert layer["layer_index"] == index
@@ -77,6 +78,23 @@ def test_flow_trace_returns_every_layer(client: TestClient):
     activations = client.get(f"/api/experiments/{body['experiment_id']}/activations")
     assert activations.status_code == 200
     assert len(activations.json()) == 4
+
+
+def test_flow_ablation_importance_is_computed_on_request(client: TestClient, manager):
+    response = client.post(
+        "/api/experiments/flow",
+        json=_flow_payload(include_ablation=True),
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    assert len(body["layers"]) == 4
+    assert all(layer["ablation_kl"] is not None for layer in body["layers"])
+    assert all(layer["ablation_kl"] >= 0 for layer in body["layers"])
+    assert not any("Ablation of" in warning for warning in body["warnings"])
+    for module in manager.model.model.modules():
+        assert len(module._forward_hooks) == 0
+        assert len(module._forward_pre_hooks) == 0
 
 
 def test_flow_trace_is_deterministic_for_greedy(client: TestClient):

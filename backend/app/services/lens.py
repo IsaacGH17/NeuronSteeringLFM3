@@ -2,9 +2,10 @@
 
 The lens projects every decoder-layer activation through the model's final norm
 and language head, which shows how the next-token prediction sharpens with depth.
-The ablation zeroes one decoder layer at a time on the prompt prefill and measures
-the KL divergence of the next-token distribution, which gives a cheap causal
-importance map per layer.
+The ablation skips one decoder layer at a time on the prompt prefill (returning
+the layer input so the residual stream is preserved) and measures the KL
+divergence of the next-token distribution, which gives a cheap causal importance
+map per layer.
 
 Nothing is fabricated: every token and probability comes from the loaded model's
 own forward pass.

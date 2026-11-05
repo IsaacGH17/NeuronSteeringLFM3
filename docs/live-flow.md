@@ -33,6 +33,7 @@ run; activation snapshots are written to disk only when persistence is enabled.
 | ribbon opacity | mean cosine similarity between consecutive layer states |
 | node glow | the current token's activation energy (`‖h_l[t]‖`) at that layer, normalized per layer for visibility |
 | moving dashes | playback of the current token; the timing is illustrative, the per-edge opacity is measured |
+| ring | per-layer ablation KL when ablation is enabled (next-token KL with that layer’s contribution skipped) |
 | colored strands | clusters of hidden dimensions; width grows with cluster mass and the endpoint dot is clickable |
 
 The widths are measured, not decorative, and **they need not grow with depth**.
@@ -88,7 +89,53 @@ cluster, not evidence that the cluster causes the behaviour.
 
 **Use these dimensions in the steering panel** sends the same components to the
 main panel as a direction, where the usual modes (steered, sweep, batch) can
-reuse them.
+reuse them. **Probe next token** opens the next-token probe with the traced
+prompt and the cluster's dimensions, so the distribution shift can be scanned
+in one forward before generating text.
+
+## Compare two traces
+
+**Single → Compare** traces two prompts, A and B, with a shared system
+instruction, max tokens, and cluster count. **Trace both** runs them
+sequentially; both runs go to experiment history.
+
+![Flow diff between "The capital of France is" and "The capital of Italy is"](screenshots/flow-diff.png)
+
+The diff graph aggregates every captured position, because A and B have
+different token sequences:
+
+| Visual | Real quantity |
+|---|---|
+| ribbon width | `|Δ residual write| = |write_B − write_A|` |
+| teal ribbon | B writes more than A |
+| orange ribbon | A writes more than B |
+| ring | `|Δ ablation KL|`, teal if B is more sensitive, orange if A is |
+| inspector table | A, B, and Δ for mean norm, write, cosine, gain, ablation KL, cluster count, top cluster mass |
+
+Token playback and cluster strands stay in **Single** mode. Clusters are per
+trace: cluster 0 is the largest cluster in each trace, not the same dimensions
+across A and B, so the diff does not match them.
+
+Reference pair: `"The capital of France is"` vs `"The capital of Italy is"`.
+At layer 12 the residual write went 0.749 → 0.672, cosine 0.780 → 0.814, and
+ablation KL 0.072 → 0.029. This is one prompt pair, not a controlled experiment.
+
+## Ablation importance
+
+`include_ablation` adds one forward per decoder layer. For each layer the
+ablation **skips that layer's contribution while preserving the residual
+stream**: the hook returns the layer's input instead of its computed output.
+This matters. Zeroing the layer output instead cuts the residual stream for
+every later layer, so every layer produces the same downstream state; the first
+implementation did exactly that and reported an identical KL (11.5973) for all
+24 layers. Returning the layer input fixed it, and the same fix was applied to
+the Interpret drawer's lens ablation.
+
+The metric is the KL divergence between the baseline and ablated next-token
+distributions at the last prompt token. In Single mode the dashed rings encode
+it; in Compare mode the rings encode the absolute A/B difference. Ablation is
+one intervention at one position: it says how sensitive the next token is to
+that layer, not what the layer represents.
 
 ## API
 
@@ -101,6 +148,7 @@ reuse them.
   "settings": {"max_new_tokens": 32, "temperature": 0, "top_p": 1, "seed": null, "enable_thinking": false},
   "cluster_k": 6,
   "cluster_max_positions": 128,
+  "include_ablation": false,
   "persist_activations": null
 }
 ```

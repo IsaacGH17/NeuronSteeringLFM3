@@ -101,6 +101,16 @@ def _tokenize(tokenizer: Any, text: str, device: str) -> dict[str, Any]:
     return {key: value.to(device) for key, value in encoded.items()}
 
 
+def render_chat_prompt(
+    tokenizer: Any,
+    prompt: str,
+    system: str | None,
+    enable_thinking: bool,
+) -> str:
+    """Render the exact chat template used for generation."""
+    return _apply_chat_template(tokenizer, prompt, system, enable_thinking)
+
+
 def count_prompt_tokens(
     tokenizer: Any,
     prompt: str,
@@ -108,7 +118,7 @@ def count_prompt_tokens(
     enable_thinking: bool,
 ) -> int:
     """Count the templated prompt tokens without touching the accelerator."""
-    templated = _apply_chat_template(tokenizer, prompt, system, enable_thinking)
+    templated = render_chat_prompt(tokenizer, prompt, system, enable_thinking)
     return int(tokenizer(templated, return_tensors="pt")["input_ids"].shape[1])
 
 

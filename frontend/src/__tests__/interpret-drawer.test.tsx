@@ -3,10 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { InterpretDrawer } from "../components/InterpretDrawer";
 import type { LensResponse, PatchResponse } from "../types";
+import { patchSweepFixture } from "../test/fixtures";
 
 const api = vi.hoisted(() => ({
   runLens: vi.fn(),
   runPatch: vi.fn(),
+  runPatchSweep: vi.fn(),
 }));
 
 vi.mock("../api/client", () => api);
@@ -65,6 +67,7 @@ const patchResponse: PatchResponse = {
 beforeEach(() => {
   api.runLens.mockReset().mockResolvedValue(lensResponse);
   api.runPatch.mockReset().mockResolvedValue(patchResponse);
+  api.runPatchSweep.mockReset().mockResolvedValue(patchSweepFixture());
 });
 
 function renderDrawer() {
@@ -79,6 +82,34 @@ function renderDrawer() {
 }
 
 describe("InterpretDrawer", () => {
+  it("runs a patch sweep and inspects a cell", async () => {
+    const user = userEvent.setup();
+    renderDrawer();
+
+    await user.click(screen.getByRole("button", { name: "Patch sweep" }));
+    await user.click(screen.getByRole("button", { name: "Run patch sweep" }));
+
+    expect(api.runPatchSweep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipient_prompt: expect.any(String),
+        donor_prompt: expect.any(String),
+        settings: expect.objectContaining({ max_new_tokens: 16, temperature: 0 }),
+        layer_indices: [0, 1],
+        positions: [-1],
+      }),
+    );
+    expect(await screen.findByText("4 cells")).toBeInTheDocument();
+    expect(screen.getByText("2 outputs changed")).toBeInTheDocument();
+    expect(screen.getByText("1 first tokens flipped")).toBeInTheDocument();
+
+    const cell = screen.getByRole("button", {
+      name: "Layer 1 position 10: first token changed",
+    });
+    await user.click(cell);
+    expect(screen.getByText("Layer 1 · position 10")).toBeInTheDocument();
+    expect(screen.getByText("Another answer.")).toBeInTheDocument();
+  });
+
   it("runs the logit lens and renders layer predictions and ablation", async () => {
     const user = userEvent.setup();
     renderDrawer();

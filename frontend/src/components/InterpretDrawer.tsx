@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { runLens, runPatch } from "../api/client";
+import { runLens, runPatch, runPatchSweep } from "../api/client";
 import type {
   GenerationSettings,
   LensResponse,
   PatchResponse,
+  PatchSweepCell,
+  PatchSweepResponse,
 } from "../types";
 
 interface LayerOption {
@@ -18,7 +20,7 @@ interface Props {
   defaultModuleId: string | null;
 }
 
-type Tab = "lens" | "patch";
+type Tab = "lens" | "patch" | "sweep";
 
 const DEFAULT_PROMPT = "Explain what a transformer activation is in two sentences.";
 const DEFAULT_DONOR = "Describe a rainy morning.";
@@ -37,6 +39,10 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function clamp(value: number, low: number, high: number): number {
+  return Math.max(low, Math.min(high, value));
+}
+
 export function InterpretDrawer({ open, onClose, layers, defaultModuleId }: Props) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const [tab, setTab] = useState<Tab>("lens");
@@ -53,6 +59,17 @@ export function InterpretDrawer({ open, onClose, layers, defaultModuleId }: Prop
   const [patch, setPatch] = useState<PatchResponse | null>(null);
   const [patchLoading, setPatchLoading] = useState(false);
   const [patchError, setPatchError] = useState<string | null>(null);
+  const [donorSystem, setDonorSystem] = useState("");
+  const [sweepLayerFrom, setSweepLayerFrom] = useState(0);
+  const [sweepLayerTo, setSweepLayerTo] = useState(999);
+  const [sweepPositionMode, setSweepPositionMode] = useState<
+    "last" | "last4" | "first4" | "custom"
+  >("last");
+  const [sweepCustomPosition, setSweepCustomPosition] = useState(7);
+  const [sweep, setSweep] = useState<PatchSweepResponse | null>(null);
+  const [sweepLoading, setSweepLoading] = useState(false);
+  const [sweepError, setSweepError] = useState<string | null>(null);
+  const [selectedCell, setSelectedCell] = useState<PatchSweepCell | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -77,6 +94,32 @@ export function InterpretDrawer({ open, onClose, layers, defaultModuleId }: Prop
     () => Math.max(1e-9, ...(lens?.layers.map((layer) => layer.ablation_kl ?? 0) ?? [0])),
     [lens],
   );
+
+  const layerMin = layers.length > 0 ? layers[0].layer_index : 0;
+  const layerMax = layers.length > 0 ? layers[layers.length - 1].layer_index : 0;
+  const resolvedFrom = clamp(sweepLayerFrom, layerMin, layerMax);
+  const resolvedTo = clamp(sweepLayerTo, resolvedFrom, layerMax);
+  const sweepLayerIndices = useMemo(
+    () =>
+      layers
+        .filter((layer) => layer.layer_index >= resolvedFrom && layer.layer_index <= resolvedTo)
+        .map((layer) => layer.layer_index),
+    [layers, resolvedFrom, resolvedTo],
+  );
+  const sweepPositions = useMemo(
+    () =>
+      sweepPositionMode === "last"
+        ? [-1]
+        : sweepPositionMode === "last4"
+          ? [-4, -3, -2, -1]
+          : sweepPositionMode === "first4"
+            ? [0, 1, 2, 3]
+            : [sweepCustomPosition],
+    [sweepPositionMode, sweepCustomPosition],
+  );
+  const sweepCellCount = sweepLayerIndices.length * sweepPositions.length;
+  const changedCount = sweep ? sweep.cells.filter((cell) => cell.changed).length : 0;
+  const flipCount = sweep ? sweep.cells.filter((cell) => cell.first_token_changed).length : 0;
 
   if (!open) return null;
 
@@ -125,6 +168,38 @@ export function InterpretDrawer({ open, onClose, layers, defaultModuleId }: Prop
     }
   };
 
+  const submitSweep = async () => {
+    if (
+      !prompt.trim() ||
+      !donorPrompt.trim() ||
+      sweepCellCount === 0 ||
+      sweepCellCount > 48
+    ) {
+      return;
+    }
+    setSweepLoading(true);
+    setSweepError(null);
+    setSweep(null);
+    setSelectedCell(null);
+    try {
+      const result = await runPatchSweep({
+        recipient_prompt: prompt,
+        recipient_system: system.trim() === "" ? null : system,
+        donor_prompt: donorPrompt,
+        donor_system: donorSystem.trim() === "" ? null : donorSystem,
+        settings: settings(maxTokens),
+        layer_indices: sweepLayerIndices,
+        positions: sweepPositions,
+      });
+      setSweep(result);
+      setSelectedCell(result.cells[0] ?? null);
+    } catch (error) {
+      setSweepError(errorMessage(error));
+    } finally {
+      setSweepLoading(false);
+    }
+  };
+
   return (
     <div className="help-backdrop" onClick={onClose}>
       <aside
@@ -161,6 +236,14 @@ export function InterpretDrawer({ open, onClose, layers, defaultModuleId }: Prop
           >
             Activation patching
           </button>
+          <button
+            type="button"
+            className={tab === "sweep" ? "active" : ""}
+            aria-pressed={tab === "sweep"}
+            onClick={() => setTab("sweep")}
+          >
+            Patch sweep
+          </button>
         </div>
 
         <div className="help-body interpret-body">
@@ -170,7 +253,7 @@ export function InterpretDrawer({ open, onClose, layers, defaultModuleId }: Prop
 
           <fieldset className="control-card">
             <legend>{tab === "lens" ? "Prompt" : "Recipient prompt"}</legend>
-            {tab === "lens" && (
+            {tab !== "patch" && (
               <label>
                 <span>System instruction (optional)</span>
                 <textarea
@@ -187,7 +270,253 @@ export function InterpretDrawer({ open, onClose, layers, defaultModuleId }: Prop
             </label>
           </fieldset>
 
-          {tab === "lens" ? (
+          {tab === "sweep" ? (
+            <>
+              <fieldset className="control-card">
+                <legend>Donor prompt</legend>
+                <label>
+                  <span>Donor</span>
+                  <textarea
+                    rows={2}
+                    value={donorPrompt}
+                    onChange={(event) => setDonorPrompt(event.target.value)}
+                  />
+                </label>
+                <label>
+                  <span>Donor system (optional)</span>
+                  <textarea
+                    rows={2}
+                    value={donorSystem}
+                    placeholder="Optional"
+                    onChange={(event) => setDonorSystem(event.target.value)}
+                  />
+                </label>
+                <p className="subtle">
+                  The donor&apos;s activation at each layer and position replaces the recipient&apos;s
+                  for the first forward only.
+                </p>
+              </fieldset>
+
+              <div className="form-grid">
+                <label>
+                  <span>Max new tokens</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={256}
+                    value={maxTokens}
+                    onChange={(event) => setMaxTokens(Number(event.target.value))}
+                  />
+                </label>
+                <label>
+                  <span>Positions</span>
+                  <select
+                    value={sweepPositionMode}
+                    onChange={(event) =>
+                      setSweepPositionMode(
+                        event.target.value as "last" | "last4" | "first4" | "custom",
+                      )
+                    }
+                  >
+                    <option value="last">Last prompt token</option>
+                    <option value="last4">Last 4 prompt tokens</option>
+                    <option value="first4">First 4 prompt tokens</option>
+                    <option value="custom">Custom position</option>
+                  </select>
+                </label>
+                {sweepPositionMode === "custom" && (
+                  <label>
+                    <span>Prompt position (negative from end)</span>
+                    <input
+                      type="number"
+                      value={sweepCustomPosition}
+                      onChange={(event) => setSweepCustomPosition(Number(event.target.value))}
+                    />
+                  </label>
+                )}
+                <label>
+                  <span>Layers from</span>
+                  <input
+                    type="number"
+                    min={layerMin}
+                    max={layerMax}
+                    value={resolvedFrom}
+                    onChange={(event) => setSweepLayerFrom(Number(event.target.value))}
+                  />
+                </label>
+                <label>
+                  <span>Layers to</span>
+                  <input
+                    type="number"
+                    min={layerMin}
+                    max={layerMax}
+                    value={resolvedTo}
+                    onChange={(event) => setSweepLayerTo(Number(event.target.value))}
+                  />
+                </label>
+              </div>
+
+              <p className="subtle">
+                {sweepCellCount} cells (max 48). Each cell is one recipient generation; start with
+                the last prompt token and a layer range.
+              </p>
+              {sweepCellCount > 48 && (
+                <p className="field-note">Narrow the layer range or use fewer positions.</p>
+              )}
+              <button
+                className="primary"
+                onClick={() => void submitSweep()}
+                disabled={
+                  sweepLoading ||
+                  !prompt.trim() ||
+                  !donorPrompt.trim() ||
+                  sweepCellCount === 0 ||
+                  sweepCellCount > 48
+                }
+              >
+                {sweepLoading ? `Running ${sweepCellCount} cells…` : "Run patch sweep"}
+              </button>
+              {sweepError && <div className="error-banner">{sweepError}</div>}
+
+              {sweep && (
+                <div className="patch-sweep-results">
+                  <div className="patch-sweep-summary">
+                    <span className="badge">{sweep.layers.length} layers</span>
+                    <span className="badge">{sweep.positions.length} positions</span>
+                    <span className="badge">{sweep.cells.length} cells</span>
+                    <span
+                      className={`badge ${changedCount > 0 ? "condition-steered" : "muted-badge"}`}
+                    >
+                      {changedCount} outputs changed
+                    </span>
+                    <span className={`badge ${flipCount > 0 ? "condition-steered" : "muted-badge"}`}>
+                      {flipCount} first tokens flipped
+                    </span>
+                    <span className="subtle">{sweep.duration_ms.toFixed(0)} ms</span>
+                  </div>
+
+                  <h4>Recipient baseline</h4>
+                  <pre className="output small">{sweep.baseline_output || "(no text generated)"}</pre>
+                  <h4>Donor</h4>
+                  <pre className="output small">{sweep.donor_output || "(no text generated)"}</pre>
+
+                  <div className="patch-sweep-legend">
+                    <span>
+                      <i className="patch-sweep-swatch same" /> unchanged
+                    </span>
+                    <span>
+                      <i className="patch-sweep-swatch changed" /> output changed
+                    </span>
+                    <span>
+                      <i className="patch-sweep-swatch flip" /> first token flipped
+                    </span>
+                  </div>
+
+                  <div className="patch-sweep-table-wrap">
+                    <table className="data-table patch-sweep-table">
+                      <thead>
+                        <tr>
+                          <th>layer</th>
+                          {sweep.positions.map((position) => (
+                            <th key={position}>
+                              {position === sweep.prompt_tokens - 1
+                                ? `pos ${position} · last`
+                                : `pos ${position}`}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sweep.layers.map((layer) => (
+                          <tr key={layer}>
+                            <th scope="row">L{layer}</th>
+                            {sweep.positions.map((position) => {
+                              const cell = sweep.cells.find(
+                                (candidate) =>
+                                  candidate.layer_index === layer &&
+                                  candidate.position === position,
+                              );
+                              if (!cell) return <td key={position}>—</td>;
+                              return (
+                                <td key={position}>
+                                  <button
+                                    type="button"
+                                    className={`patch-cell ${
+                                      cell.first_token_changed
+                                        ? "flip"
+                                        : cell.changed
+                                          ? "changed"
+                                          : "same"
+                                    } ${selectedCell === cell ? "selected" : ""}`}
+                                    aria-label={`Layer ${layer} position ${position}: ${
+                                      cell.first_token_changed
+                                        ? "first token changed"
+                                        : cell.changed
+                                          ? "output changed"
+                                          : "unchanged"
+                                    }`}
+                                    title={`L${layer} pos ${position}: ${
+                                      cell.first_token_changed
+                                        ? "first token changed"
+                                        : cell.changed
+                                          ? "output changed"
+                                          : "unchanged"
+                                    } · prefix ${cell.common_prefix_tokens}/${cell.generated_tokens}`}
+                                    onClick={() => setSelectedCell(cell)}
+                                  >
+                                    {cell.first_token_changed ? "⇄" : cell.changed ? "≠" : "="}
+                                  </button>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {selectedCell && (
+                    <div className="patch-sweep-detail">
+                      <h4>
+                        Layer {selectedCell.layer_index} · position {selectedCell.position}
+                      </h4>
+                      <p className="subtle">
+                        donor position {selectedCell.donor_position} · common prefix{" "}
+                        {selectedCell.common_prefix_tokens}/{selectedCell.generated_tokens} generated
+                        tokens ·{" "}
+                        {selectedCell.first_token_changed
+                          ? "first token changed"
+                          : selectedCell.changed
+                            ? "output changed"
+                            : "unchanged"}
+                      </p>
+                      <h4>Patched</h4>
+                      <pre className="output small">
+                        {selectedCell.patched_output || "(no text generated)"}
+                      </pre>
+                      {selectedCell.warnings.map((warning) => (
+                        <div key={warning} className="warning-banner inline">
+                          {warning}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {changedCount === 0 && (
+                    <p className="subtle">
+                      No output changed in this grid. That is a real result; try another layer range
+                      or positions.
+                    </p>
+                  )}
+                  {sweep.warnings.map((warning) => (
+                    <div key={warning} className="warning-banner inline">
+                      {warning}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : tab === "lens" ? (
             <>
               <div className="form-grid">
                 <label>

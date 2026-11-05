@@ -7,6 +7,7 @@ import {
   architectureFixture,
   baselineFixture,
   diagnosticsFixture,
+  nextTokenFixture,
   loadedStatus,
   moduleDetailFixture,
   unloadedStatus,
@@ -31,6 +32,10 @@ const api = vi.hoisted(() => {
     runBaseline: vi.fn(),
     runSteering: vi.fn(),
     runFlow: vi.fn(),
+    runNextToken: vi.fn(),
+    runNeuronTrace: vi.fn(),
+    runNeuronSteering: vi.fn(),
+    runPatchSweep: vi.fn(),
     runSweep: vi.fn(),
     listExperiments: vi.fn(),
     getExperiment: vi.fn(),
@@ -68,6 +73,7 @@ beforeEach(() => {
     }),
   });
   api.runFlow.mockReset();
+  api.runNextToken.mockReset().mockResolvedValue(nextTokenFixture());
   api.runSweep.mockReset().mockResolvedValue({
     sweep_id: "c".repeat(32),
     runs: [],
@@ -332,5 +338,23 @@ describe("App", () => {
     expect(screen.getByRole("dialog", { name: "Transformer flow" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog", { name: "Transformer flow" })).not.toBeInTheDocument();
+  });
+
+  it("opens the neuron explorer from the topbar", async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await user.click(await screen.findByRole("button", { name: "Neurons" }));
+    expect(screen.getByRole("dialog", { name: "Neuron explorer" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Neuron explorer" })).not.toBeInTheDocument();
+  });
+
+  it("opens the next-token probe from the topbar", async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await user.click(await screen.findByRole("button", { name: "Probe" }));
+    expect(screen.getByRole("dialog", { name: "Next-token probe" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Next-token probe" })).not.toBeInTheDocument();
   });
 });

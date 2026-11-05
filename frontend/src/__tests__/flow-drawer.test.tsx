@@ -73,6 +73,7 @@ describe("FlowDrawer", () => {
     expect(payload.settings.temperature).toBe(0);
     expect(payload.settings.enable_thinking).toBe(false);
     expect(payload.cluster_k).toBe(6);
+    expect(payload.include_ablation).toBe(true);
 
     expect(
       screen.getByRole("group", { name: /Layer flow graph with 3 layers and 2 measured connections/ }),
@@ -80,6 +81,7 @@ describe("FlowDrawer", () => {
     expect(screen.getByRole("button", { name: /Layer 2 cluster 0/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Token 3: blue/ })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Layer 1" })).toBeInTheDocument();
+    expect(screen.getByText("ablation KL")).toBeInTheDocument();
   });
 
   it("selects a cluster, shows its dimensions, and steers the group", async () => {
@@ -113,6 +115,62 @@ describe("FlowDrawer", () => {
     expect(await screen.findByText("output changed")).toBeInTheDocument();
     expect(screen.getByText("An activation is a steered vector.")).toBeInTheDocument();
     expect(onExperimentRecorded).toHaveBeenCalled();
+  });
+
+  it("compares two traces and shows the ablation delta", async () => {
+    const user = userEvent.setup();
+    const left = flowFixture();
+    const right = flowFixture({
+      prompt: "Describe a rainy morning.",
+      output: "Rain on the window.",
+    });
+    right.layers = right.layers.map((layer, index) => ({
+      ...layer,
+      write: layer.write + 0.05 * (index + 1),
+      ablation_kl: (layer.ablation_kl ?? 0) + 0.1,
+    }));
+    api.runFlow.mockReset().mockResolvedValueOnce(left).mockResolvedValueOnce(right);
+    renderDrawer();
+
+    await user.click(screen.getByRole("button", { name: "Compare" }));
+    await user.click(screen.getByRole("button", { name: "Trace both" }));
+
+    await waitFor(() => expect(api.runFlow).toHaveBeenCalledTimes(2));
+    const first = api.runFlow.mock.calls[0][0];
+    const second = api.runFlow.mock.calls[1][0];
+    expect(first.prompt).toContain("transformer activation");
+    expect(second.prompt).toBe("Describe a rainy morning.");
+    expect(first.include_ablation).toBe(true);
+    expect(second.include_ablation).toBe(true);
+
+    expect(
+      await screen.findByRole("group", { name: /Flow diff graph with 3 layers/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Δ stream · B − A")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Layer 2, A attention/ }));
+    expect(screen.getByRole("heading", { name: "Layer 2 · B − A" })).toBeInTheDocument();
+    expect(screen.getByText("ablation KL")).toBeInTheDocument();
+  });
+
+  it("hands the selected cluster to the next-token probe", async () => {
+    const user = userEvent.setup();
+    const onProbeCluster = vi.fn();
+    renderDrawer({ onProbeCluster });
+
+    await trace(user);
+    await user.click(screen.getByRole("button", { name: /Layer 2 cluster 0/ }));
+    await user.click(screen.getByRole("button", { name: "Probe next token" }));
+
+    expect(onProbeCluster).toHaveBeenCalledWith({
+      prompt: flow.prompt,
+      system: null,
+      steering: expect.objectContaining({
+        module_id: "model.layers.2",
+        strength: 1,
+        normalization: "sigma",
+        components: flow.layers[2].clusters[0].components,
+      }),
+    });
   });
 
   it("sends the selected cluster to the steering panel", async () => {

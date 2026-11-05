@@ -7,6 +7,10 @@ import type {
   ExperimentSummary,
   FlowResponse,
   GenerationSettings,
+  NextTokenResponse,
+  NeuronSteeringResponse,
+  NeuronTraceResponse,
+  PatchSweepResponse,
   ModuleDetail,
   ModuleNode,
   ModelStatus,
@@ -365,6 +369,7 @@ export function flowFixture(overrides: Partial<FlowResponse> = {}): FlowResponse
       energy: [1, 2, 3, 4].map((value) => value + layerIndex),
       delta: [0.5, 1, 1.5, 2].map((value) => value + layerIndex * 0.2),
       clusters: flowClusters(layerIndex),
+      ablation_kl: 0.2 + layerIndex * 0.1,
     })),
     edges: [
       { source_layer: 0, target_layer: 1, write: 0.42, similarity: 0.9, gain: 1.1 },
@@ -374,6 +379,227 @@ export function flowFixture(overrides: Partial<FlowResponse> = {}): FlowResponse
     cluster_k: 2,
     cluster_positions: 4,
     settings: DEFAULT_SETTINGS,
+    warnings: [],
+    ...overrides,
+  };
+}
+
+
+export function nextTokenFixture(overrides: Partial<NextTokenResponse> = {}): NextTokenResponse {
+  const candidates = [
+    {
+      token_id: 100,
+      text: "A",
+      baseline_probability: 0.42,
+      steered_probability: 0.31,
+      delta: -0.11,
+    },
+    {
+      token_id: 101,
+      text: "The",
+      baseline_probability: 0.21,
+      steered_probability: 0.38,
+      delta: 0.17,
+    },
+    {
+      token_id: 102,
+      text: "This",
+      baseline_probability: 0.12,
+      steered_probability: 0.08,
+      delta: -0.04,
+    },
+  ];
+  return {
+    prompt: "Hello",
+    system: null,
+    model_id: "LiquidAI/LFM3-1.7B",
+    device: "cuda",
+    prompt_tokens: 12,
+    position: 11,
+    top_k: 3,
+    baseline: {
+      tokens: candidates.map((candidate) => ({
+        token_id: candidate.token_id,
+        text: candidate.text,
+        probability: candidate.baseline_probability,
+      })),
+      entropy: 1.2,
+    },
+    steered: {
+      tokens: [
+        { token_id: 101, text: "The", probability: 0.38 },
+        { token_id: 100, text: "A", probability: 0.31 },
+        { token_id: 102, text: "This", probability: 0.08 },
+      ],
+      entropy: 1.1,
+    },
+    candidates,
+    kl_divergence: 0.23,
+    steering: {
+      module_id: "model.layers.12",
+      strength: 1,
+      feature_index: null,
+      components: [{ feature_index: 1, weight: 1 }],
+      normalization: "sigma",
+    },
+    duration_ms: 12.3,
+    warnings: [],
+    ...overrides,
+  };
+}
+
+
+export function patchSweepFixture(overrides: Partial<PatchSweepResponse> = {}): PatchSweepResponse {
+  const cells = [
+    {
+      layer_index: 0,
+      module_id: "model.layers.0",
+      position: 10,
+      donor_position: 10,
+      patched_output: "The baseline answer.",
+      changed: false,
+      first_token_changed: false,
+      common_prefix_tokens: 4,
+      generated_tokens: 4,
+      warnings: [],
+    },
+    {
+      layer_index: 0,
+      module_id: "model.layers.0",
+      position: 11,
+      donor_position: 11,
+      patched_output: "A different answer.",
+      changed: true,
+      first_token_changed: false,
+      common_prefix_tokens: 1,
+      generated_tokens: 3,
+      warnings: [],
+    },
+    {
+      layer_index: 1,
+      module_id: "model.layers.1",
+      position: 10,
+      donor_position: 10,
+      patched_output: "Another answer.",
+      changed: true,
+      first_token_changed: true,
+      common_prefix_tokens: 0,
+      generated_tokens: 2,
+      warnings: [],
+    },
+    {
+      layer_index: 1,
+      module_id: "model.layers.1",
+      position: 11,
+      donor_position: 11,
+      patched_output: "The baseline answer.",
+      changed: false,
+      first_token_changed: false,
+      common_prefix_tokens: 4,
+      generated_tokens: 4,
+      warnings: [],
+    },
+  ];
+  return {
+    recipient_prompt: "Hello",
+    donor_prompt: "World",
+    baseline_output: "The baseline answer.",
+    donor_output: "A different answer.",
+    prompt_tokens: 12,
+    donor_prompt_tokens: 12,
+    layers: [0, 1],
+    positions: [10, 11],
+    cells,
+    duration_ms: 1234,
+    warnings: [],
+    ...overrides,
+  };
+}
+
+
+export function neuronTraceFixture(
+  overrides: Partial<NeuronTraceResponse> = {},
+): NeuronTraceResponse {
+  const assignments = Array.from({ length: 256 }, (_, index) => (index < 160 ? 0 : 1));
+  const clusters = [
+    {
+      id: 0,
+      size: 160,
+      mass: 0.62,
+      cohesion: 0.71,
+      peak_position: 2,
+      top_neurons: [
+        { neuron: 7, weight: 1, mean_abs: 0.9, sigma: 0.2 },
+        { neuron: 31, weight: 0.6, mean_abs: 0.7, sigma: 0.15 },
+      ],
+      profile: [0.1, 0.2, 0.3, 0.2],
+      profile_positions: [0, 1, 2, 3],
+    },
+    {
+      id: 1,
+      size: 96,
+      mass: 0.38,
+      cohesion: 0.55,
+      peak_position: 1,
+      top_neurons: [
+        { neuron: 200, weight: -0.8, mean_abs: 0.5, sigma: 0.1 },
+      ],
+      profile: [-0.1, -0.2, -0.1, -0.15],
+      profile_positions: [0, 1, 2, 3],
+    },
+  ];
+  return {
+    experiment_id: "e".repeat(32),
+    prompt: "Hello",
+    system: null,
+    output: "The baseline answer.",
+    tokens: [
+      { index: 0, token_id: 1, text: "Hello", phase: "prompt" },
+      { index: 1, token_id: 2, text: " world", phase: "prompt" },
+      { index: 2, token_id: 3, text: " answer", phase: "generated" },
+    ],
+    prompt_tokens: 2,
+    generated_tokens: 1,
+    layer_index: 1,
+    layer_type: "full_attention",
+    intermediate_size: 256,
+    hidden_size: 128,
+    residual_rms: 2.3,
+    clusters,
+    top_neurons: clusters[0].top_neurons,
+    assignments,
+    cluster_positions: 4,
+    warnings: [],
+    ...overrides,
+  };
+}
+
+export function neuronSteeringFixture(
+  overrides: Partial<NeuronSteeringResponse> = {},
+): NeuronSteeringResponse {
+  return {
+    layer_index: 1,
+    alpha: 0.7,
+    neurons: [
+      { neuron: 7, weight: 1 },
+      { neuron: 31, weight: 0.6 },
+    ],
+    direction_norm: 1.2,
+    residual_rms: 2.3,
+    deltas: [
+      { neuron: 7, delta: 1.34 },
+      { neuron: 31, delta: 0.8 },
+    ],
+    baseline: baselineFixture({
+      id: "a".repeat(32),
+      output: "The baseline answer.",
+    }),
+    steered: baselineFixture({
+      id: "b".repeat(32),
+      condition: "steered",
+      output: "A steered answer.",
+    }),
+    duration_ms: 120,
     warnings: [],
     ...overrides,
   };

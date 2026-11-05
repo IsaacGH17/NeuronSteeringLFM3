@@ -13,8 +13,11 @@ A local-first research and educational tool: explore the model's internal activa
 - **Batch experiments** — one background job runs prompt suite × module preset × strengths (+ control, repeats), reports live progress, can be cancelled, and persists every completed run as it goes.
 - **Multi-strength sweeps and controls** — run several strengths against one baseline, optionally adding a seeded random-feature control that matches the intervention magnitude.
 - **Experiment history and export** — every run is saved as a JSONL metadata record; inspect, compare, reopen, and export selected or all runs as JSONL/CSV. Activation tensors stay ephemeral unless snapshot persistence is enabled.
-- **Internal mechanics** — an Interpret drawer adds a logit lens (per-layer next-token predictions), a per-layer ablation map (KL of the next-token distribution when a layer is zeroed), and activation patching between two prompts.
-- **Live flow** — one real generation captured across every decoder layer, drawn as an animated residual stream: measured write/similarity between layers, per-token playback, and clusters of hidden dimensions that move together. A cluster can be steered in place (σ units, baseline vs. steered) or sent to the main steering panel. See [`docs/live-flow.md`](docs/live-flow.md).
+- **Internal mechanics** — an Interpret drawer adds a logit lens (per-layer next-token predictions), a per-layer ablation map (KL of the next-token distribution when a layer’s contribution is skipped, preserving the residual stream), and activation patching between two prompts.
+- **Live flow** — one real generation captured across every decoder layer, drawn as an animated residual stream: measured write/similarity between layers, per-token playback, and clusters of hidden dimensions that move together. A cluster can be steered in place (σ units, baseline vs. steered), sent to the main steering panel, or handed to the next-token probe. **Compare** traces two prompts and draws the Δ stream, with residual-preserving ablation rings. See [`docs/live-flow.md`](docs/live-flow.md).
+- **Next-token probe** — one forward at the last prompt token with an optional steering spec: baseline vs. steered top-k distributions, KL, entropy, and per-token deltas. Re-probes on α changes (~80 ms warm on the reference card), generates no text, and saves nothing. Seed it from a Flow cluster or the current direction. See [`docs/next-token-probe.md`](docs/next-token-probe.md).
+- **Patch sweep** — a causal-tracing grid over layers × prompt positions. The donor’s activation replaces the recipient’s at one layer/position for the first forward only; the grid marks unchanged, output-changed, and first-token-flipped cells, and each cell shows its patched text. See [`docs/patch-sweep.md`](docs/patch-sweep.md).
+- **Neuron explorer (w2)** — one layer’s 7680 MLP neurons captured from the `feed_forward.w2` intermediate, clustered by activation profile, drawn as a cluster map, and steered as a group through the w2 columns in residual-RMS units. See [`docs/neurons.md`](docs/neurons.md).
 - **Built-in help** — a Help drawer explains activations, hidden dimensions, α, run modes, controls, reproducibility, hooks, storage, and limitations.
 - **Tooltip control** — a topbar toggle enables or disables native and heatmap tooltips; the preference persists in local storage.
 
@@ -47,6 +50,40 @@ its top dimensions:
 
 *Both flow views are real runs of LFM3-1.7B on the reference RX 7600.*
 
+The **Flow → Compare** mode traces two prompts and draws the difference. Ribbon
+width is |Δ residual write| (teal: B writes more; orange: A writes more), and
+rings encode |Δ ablation KL|; the inspector lists A, B, and Δ for every layer:
+
+![Flow diff between two prompts, with ablation deltas](docs/screenshots/flow-diff.png)
+
+*France vs Italy at the next-token decision; layer 12 write 0.749 → 0.672, ablation KL 0.072 → 0.029.*
+
+The **Probe** drawer reads the next-token distribution after a single forward.
+It can be seeded from a Flow cluster, so the same dimensions that were visible in
+the stream can be scanned at different α values without generating text:
+
+![Next-token probe with baseline and steered distributions](docs/screenshots/next-token-probe.png)
+
+*Real probe seeded from layer 23 cluster 0 at α = 2 σ; KL 0.0054, 83 ms.*
+
+The **Interpret → Patch sweep** tab runs the same patching intervention across a
+grid of layers and prompt positions:
+
+![Patch sweep at the country token across all 24 layers](docs/screenshots/patch-sweep.png)
+
+*France vs Italy at the `" France"` token: 20/24 outputs changed and layers 5–7
+flipped the first token to “Rome.”; the same sweep at the template tail changed
+0/24.*
+
+The **Neurons** drawer works one layer deeper, at the MLP `w2` intermediate:
+7680 neurons per layer, clustered by activation profile and steered as a group
+through their w2 columns.
+
+![Neuron explorer on layer 16 with six w2-neuron clusters](docs/screenshots/neuron-explorer.png)
+
+*Layer 16, six clusters; the cluster map is grouped by cluster. Group steering
+at α = 0.7 changed the rainy-morning output.*
+
 ![Help drawer with the key concepts](docs/screenshots/help.png)
 
 ## Architecture
@@ -59,7 +96,7 @@ its top dimensions:
 
 The backend is the sole authority on tensor shapes, module names, and results; the frontend never fabricates model data. When `frontend/dist` exists, FastAPI serves the built frontend at `/`.
 
-Development is phased (see `PLAN.md`); Phases 1–7 plus the Phase 8 vector/batch/interpret work and the live-flow addition are implemented. Tested features are listed at the end of this file.
+Development is phased (see `PLAN.md`); Phases 1–7 plus the Phase 8 vector/batch/interpret work, live flow, and the next-token probe are implemented. Tested features are listed at the end of this file.
 
 ## Requirements
 
@@ -148,6 +185,9 @@ Core endpoints (all under `/api`):
 - `GET /suites` (built-in trait and capability prompt suites with verifiable checks)
 - `POST /experiments/lens` (logit lens + per-layer ablation), `POST /experiments/patch` (activation patching donor → recipient)
 - `POST /experiments/flow` (capture every decoder layer and return layer metrics, per-token energy, edges, and dimension clusters)
+- `POST /experiments/next-token` (one forward at the last prompt token; baseline and optional steered top-k distributions, KL, and candidates)
+- `POST /experiments/patch-sweep` (causal tracing grid over layers × prompt positions; max 48 cells)
+- `POST /experiments/neurons` (one layer’s w2 intermediate captured and clustered) and `POST /experiments/neuron-steering` (group steering through w2 columns in residual-RMS units)
 - `GET /experiments` (filters: `condition`, `sweep_id`, `module_id`, `limit`, `offset`)
 - `GET /experiments/{id}`, `GET /experiments/{id}/activations[/{module_id}]`
 - `GET /experiments/export?format=jsonl|csv&ids=...` (`ids` optional; empty exports all)
@@ -195,9 +235,13 @@ Verified on the reference machine unless noted:
 - Optional activation snapshot persistence and restoration within the byte budget.
 - Apple-inspired light interface: SF Pro/Inter, hairline surfaces, system pigments, and a line-based Flow graph; rendered and checked in Chromium at 1680×1120, 760×1120, and 700×1500.
 - Live flow trace: all 24 decoder layers captured in one real generation; measured residual write/cosine/gain, per-token energy, deterministic dimension clusters, and in-place cluster steering. Verified on the real model (24 layers, 23 edges, 6 clusters/layer; α = 2 σ on layer 23 cluster 0 changed the text). Synthetic tests cover metrics, clustering, the 512-position budget, hook removal, and determinism.
-- Backend suite: 125 passed, 3 skipped offline; frontend suite: 92 tests across 10 files; production build passes.
+- Next-token probe: one forward, baseline vs. steered top-k distributions, KL, entropy, and candidate deltas; seeded from a Flow cluster or the current direction. Verified on the real model (~74–83 ms warm; α = 0 gives KL 0; a cluster at α = 2 σ moved the next-token mass).
+- Flow compare + ablation: A/B traces with Δ write/similarity/gain and residual-preserving per-layer ablation KL, plus ablation rings in Single mode. Verified on the real model (France vs Italy; layer 12 write 0.749 → 0.672, ablation KL 0.072 → 0.029).
+- Patch sweep: layers × positions grid with unchanged/output-changed/first-token-flipped cells and per-cell patched text. Verified on the real model (France vs Italy at the country token: 20/24 changed, layers 5–7 flipped the first token; template-tail sweep: 0/24).
+- Neuron explorer: w2-intermediate capture for one layer, deterministic neuron clusters, a cluster map grouped by cluster, and group steering in residual-RMS units. Verified on the real model (layer 16, 6 clusters, 1643-neuron cluster at α = 0.7 changed the output; direction norm 0.1147).
+- Backend suite: 151 passed, 3 skipped offline; frontend suite: 107 tests across 12 files; production build passes.
 - End-to-end HTTP smoke test: FastAPI served the built frontend, loaded the real model, returned the architecture, ran a captured baseline, and read it back from history.
-- End-to-end browser smoke test: headless Chromium opened the Flow drawer, traced a real 52-position generation, selected a cluster, and rendered a real baseline/steered comparison.
+- End-to-end browser smoke test: headless Chromium opened the Flow drawer, traced a real 52-position generation, selected a cluster, handed it to the Probe, and rendered the real baseline/steered distributions.
 - Limits are configurable instead of hardcoded: `LFM3_MAX_STEERING_STRENGTH` (default ±1000), `LFM3_MAX_BATCH_RUNS` (2000), `LFM3_ACTIVATION_STORE_EXPERIMENTS`, `LFM3_ACTIVATION_STORE_BYTES` (512 MB).
 
 ## Repository layout

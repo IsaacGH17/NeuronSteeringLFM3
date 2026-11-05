@@ -17,9 +17,15 @@ interface Props {
   onClose: () => void;
   onUseDirection: (direction: DirectionResponse) => void;
   onExperimentRecorded?: () => void;
+  onProbeCluster?: (payload: {
+    prompt: string;
+    system: string | null;
+    steering: SteeringSpec;
+  }) => void;
 }
 
 const DEFAULT_PROMPT = "Explain what a transformer activation is in two sentences.";
+const DEFAULT_RIGHT_PROMPT = "Describe a rainy morning.";
 const GREEDY: Omit<GenerationSettings, "max_new_tokens"> = {
   temperature: 0,
   top_p: 1,
@@ -80,6 +86,7 @@ export function FlowDrawer({
   onClose,
   onUseDirection,
   onExperimentRecorded,
+  onProbeCluster,
 }: Props) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
@@ -87,6 +94,13 @@ export function FlowDrawer({
   const [maxTokens, setMaxTokens] = useState(32);
   const [clusterCount, setClusterCount] = useState(6);
   const [flow, setFlow] = useState<FlowResponse | null>(null);
+  const [mode, setMode] = useState<"single" | "compare">("single");
+  const [rightPrompt, setRightPrompt] = useState(DEFAULT_RIGHT_PROMPT);
+  const [leftFlow, setLeftFlow] = useState<FlowResponse | null>(null);
+  const [rightFlow, setRightFlow] = useState<FlowResponse | null>(null);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareError, setCompareError] = useState<string | null>(null);
+  const [includeAblation, setIncludeAblation] = useState(true);
   const [traceFormOpen, setTraceFormOpen] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -128,6 +142,19 @@ export function FlowDrawer({
     () => flow?.layers.find((layer) => layer.layer_index === selectedLayer) ?? null,
     [flow, selectedLayer],
   );
+  const leftLayerData = useMemo(
+    () => leftFlow?.layers.find((layer) => layer.layer_index === selectedLayer) ?? null,
+    [leftFlow, selectedLayer],
+  );
+  const rightLayerData = useMemo(
+    () => rightFlow?.layers.find((layer) => layer.layer_index === selectedLayer) ?? null,
+    [rightFlow, selectedLayer],
+  );
+  const compareReady = leftFlow !== null && rightFlow !== null;
+  const showCompact =
+    mode === "single"
+      ? Boolean(flow && !traceFormOpen)
+      : Boolean(compareReady && !traceFormOpen);
   const selectedClusterData = useMemo(
     () => selectedLayerData?.clusters.find((cluster) => cluster.id === selectedCluster) ?? null,
     [selectedLayerData, selectedCluster],
@@ -154,6 +181,7 @@ export function FlowDrawer({
         settings: settingsForTrace(),
         cluster_k: clusterCount,
         cluster_max_positions: 128,
+        include_ablation: includeAblation,
       });
       setFlow(result);
       setTokenIndex(
@@ -171,6 +199,70 @@ export function FlowDrawer({
       setError(errorMessage(traceError));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const submitCompare = async () => {
+    if (!prompt.trim() || !rightPrompt.trim() || compareLoading) return;
+    setCompareLoading(true);
+    setCompareError(null);
+    setLeftFlow(null);
+    setRightFlow(null);
+    setSelectedCluster(null);
+    setSteerResult(null);
+    setSteerError(null);
+    try {
+      const left = await runFlow({
+        prompt,
+        system: system.trim() === "" ? null : system,
+        settings: settingsForTrace(),
+        cluster_k: clusterCount,
+        cluster_max_positions: 128,
+        include_ablation: includeAblation,
+      });
+      setLeftFlow(left);
+      onExperimentRecorded?.();
+      const right = await runFlow({
+        prompt: rightPrompt,
+        system: system.trim() === "" ? null : system,
+        settings: settingsForTrace(),
+        cluster_k: clusterCount,
+        cluster_max_positions: 128,
+        include_ablation: includeAblation,
+      });
+      setRightFlow(right);
+      onExperimentRecorded?.();
+      setSelectedLayer(
+        left.layers.length > 0
+          ? left.layers[Math.floor(left.layers.length / 2)].layer_index
+          : null,
+      );
+      setTraceFormOpen(false);
+    } catch (traceError) {
+      setCompareError(errorMessage(traceError));
+    } finally {
+      setCompareLoading(false);
+    }
+  };
+
+  const switchMode = (next: "single" | "compare") => {
+    setMode(next);
+    setSelectedCluster(null);
+    setPlaying(false);
+    setSteerResult(null);
+    setSteerError(null);
+    if (next === "compare") {
+      setSelectedLayer(
+        leftFlow && leftFlow.layers.length > 0
+          ? leftFlow.layers[Math.floor(leftFlow.layers.length / 2)].layer_index
+          : null,
+      );
+    } else {
+      setSelectedLayer(
+        flow && flow.layers.length > 0
+          ? flow.layers[Math.floor(flow.layers.length / 2)].layer_index
+          : null,
+      );
     }
   };
 
@@ -251,14 +343,44 @@ export function FlowDrawer({
         </header>
 
         <div className="flow-body">
-          {flow && !traceFormOpen ? (
+          <div className="flow-mode-bar segmented" role="group" aria-label="Flow mode">
+            <button
+              type="button"
+              className={mode === "single" ? "active" : ""}
+              aria-pressed={mode === "single"}
+              onClick={() => switchMode("single")}
+            >
+              Single
+            </button>
+            <button
+              type="button"
+              className={mode === "compare" ? "active" : ""}
+              aria-pressed={mode === "compare"}
+              onClick={() => switchMode("compare")}
+            >
+              Compare
+            </button>
+          </div>
+
+          {showCompact ? (
             <div className="flow-trace-compact">
               <div className="flow-trace-compact-copy">
-                <span className="flow-trace-compact-label">Trace</span>
-                <span className="flow-trace-compact-prompt">{flow.prompt}</span>
+                <span className="flow-trace-compact-label">
+                  {mode === "single" ? "Trace" : "Compare"}
+                </span>
+                <span className="flow-trace-compact-prompt">
+                  {mode === "single"
+                    ? flow?.prompt
+                    : `A: ${leftFlow?.prompt} · B: ${rightFlow?.prompt}`}
+                </span>
                 <span className="subtle">
-                  max {flow.settings.max_new_tokens} tokens · k = {flow.cluster_k} ·{" "}
-                  {flow.layers.length} layers
+                  {mode === "single"
+                    ? `max ${flow?.settings.max_new_tokens} tokens · k = ${flow?.cluster_k} · ${
+                        flow?.layers.length
+                      } layers${flow?.layers.some((layer) => layer.ablation_kl !== null) ? " · ablation" : ""}`
+                    : `A ${leftFlow?.tokens.length} · B ${rightFlow?.tokens.length} positions · k = ${clusterCount}${
+                        includeAblation ? " · ablation" : ""
+                      }`}
                 </span>
               </div>
               <button
@@ -266,73 +388,110 @@ export function FlowDrawer({
                 className="secondary small"
                 onClick={() => setTraceFormOpen(true)}
               >
-                New trace
+                {mode === "single" ? "New trace" : "New comparison"}
               </button>
             </div>
           ) : (
-          <fieldset className="control-card flow-trace-card">
-            <legend>Trace a real generation</legend>
-            <div className="flow-trace-fields">
-              <label>
-                <span>Prompt</span>
-                <textarea rows={3} value={prompt} onChange={(event) => setPrompt(event.target.value)} />
-              </label>
-              <label>
-                <span>System instruction (optional)</span>
-                <textarea
-                  rows={2}
-                  value={system}
-                  placeholder="Optional"
-                  onChange={(event) => setSystem(event.target.value)}
-                />
-              </label>
-            </div>
-            <div className="flow-trace-row">
-              <label>
-                <span>Max new tokens</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={128}
-                  value={maxTokens}
-                  onChange={(event) => setMaxTokens(Number(event.target.value))}
-                />
-              </label>
-              <label>
-                <span>Clusters per layer</span>
-                <select
-                  value={clusterCount}
-                  onChange={(event) => setClusterCount(Number(event.target.value))}
-                >
-                  {[3, 4, 5, 6, 8, 10].map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {flow && (
+            <fieldset className="control-card flow-trace-card">
+              <legend>
+                {mode === "single" ? "Trace a real generation" : "Compare two real generations"}
+              </legend>
+              <div className={`flow-trace-fields ${mode === "compare" ? "compare" : ""}`}>
+                <label>
+                  <span>{mode === "single" ? "Prompt" : "A · prompt"}</span>
+                  <textarea
+                    rows={mode === "single" ? 3 : 2}
+                    value={prompt}
+                    onChange={(event) => setPrompt(event.target.value)}
+                  />
+                </label>
+                {mode === "compare" && (
+                  <label>
+                    <span>B · prompt</span>
+                    <textarea
+                      rows={2}
+                      value={rightPrompt}
+                      onChange={(event) => setRightPrompt(event.target.value)}
+                    />
+                  </label>
+                )}
+                <label className={mode === "compare" ? "span-2" : ""}>
+                  <span>System instruction (optional)</span>
+                  <textarea
+                    rows={2}
+                    value={system}
+                    placeholder="Optional"
+                    onChange={(event) => setSystem(event.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="flow-trace-row">
+                <label>
+                  <span>Max new tokens</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={128}
+                    value={maxTokens}
+                    onChange={(event) => setMaxTokens(Number(event.target.value))}
+                  />
+                </label>
+                <label>
+                  <span>Clusters per layer</span>
+                  <select
+                    value={clusterCount}
+                    onChange={(event) => setClusterCount(Number(event.target.value))}
+                  >
+                    {[3, 4, 5, 6, 8, 10].map((value) => (
+                      <option key={value} value={value}>
+                        {value}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {((mode === "single" && flow) || (mode === "compare" && compareReady)) && (
+                  <button
+                    type="button"
+                    className="secondary small"
+                    onClick={() => setTraceFormOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                )}
                 <button
-                  type="button"
-                  className="secondary small"
-                  onClick={() => setTraceFormOpen(false)}
+                  className="primary"
+                  onClick={() => void (mode === "single" ? submitTrace() : submitCompare())}
+                  disabled={
+                    disabled ||
+                    loading ||
+                    compareLoading ||
+                    !prompt.trim() ||
+                    (mode === "compare" && !rightPrompt.trim())
+                  }
                 >
-                  Cancel
+                  {mode === "single"
+                    ? loading
+                      ? "Tracing every layer…"
+                      : "Trace flow"
+                    : compareLoading
+                      ? "Tracing A then B…"
+                      : "Trace both"}
                 </button>
-              )}
-              <button
-                className="primary"
-                onClick={() => void submitTrace()}
-                disabled={disabled || loading || !prompt.trim()}
-              >
-                {loading ? "Tracing every layer…" : "Trace flow"}
-              </button>
-            </div>
-            <p className="subtle">
-              A trace captures all decoder layers, so it is capped at 512 positions. Generation is greedy
-              (temperature 0) and thinking is off, matching the rest of the app.
-            </p>
-          </fieldset>
+              </div>
+              <label className="checkbox flow-ablation-toggle">
+                <input
+                  type="checkbox"
+                  checked={includeAblation}
+                  onChange={(event) => setIncludeAblation(event.target.checked)}
+                />
+                <span>Ablation importance (one extra forward per layer)</span>
+              </label>
+              <p className="subtle">
+                {mode === "single"
+                  ? "A trace captures all decoder layers, so it is capped at 512 positions. Generation is greedy (temperature 0) and thinking is off, matching the rest of the app."
+                  : "Compare runs A and B sequentially, captures every decoder layer in both, and keeps both runs in history. Ablation adds one forward per layer per trace."}
+              </p>
+            </fieldset>
           )}
 
           {disabled && (
@@ -341,9 +500,11 @@ export function FlowDrawer({
             </div>
           )}
 
-          {error && <div className="error-banner">{error}</div>}
+          {(error || compareError) && (
+            <div className="error-banner">{error ?? compareError}</div>
+          )}
 
-          {!flow && (
+          {mode === "single" && !flow && (
             <div className="empty flow-empty">
               <p>
                 Run a trace to see the residual stream as it actually is: each layer writes into the
@@ -353,11 +514,27 @@ export function FlowDrawer({
                 <li>Ribbon width is the residual write: mean ‖h<sub>l</sub> − h<sub>l−1</sub>‖ / ‖h<sub>l−1</sub>‖.</li>
                 <li>Ribbon opacity is the mean cosine between consecutive layer states.</li>
                 <li>Colored strands are clusters of hidden dimensions whose activation profiles move together.</li>
+                <li>Rings encode per-layer ablation importance when enabled.</li>
               </ul>
             </div>
           )}
 
-          {flow && (
+          {mode === "compare" && !compareReady && (
+            <div className="empty flow-empty">
+              <p>
+                Compare traces two real generations, A and B, and draws the difference between them.
+                The stream aggregates every captured position because the two prompts have different
+                token sequences.
+              </p>
+              <ul>
+                <li>Ribbon width is |Δ residual write|; teal means B writes more, orange means A writes more.</li>
+                <li>Rings encode |Δ ablation KL| for the next-token distribution.</li>
+                <li>Both traces stay in experiment history; switch to Single for token playback and cluster steering.</li>
+              </ul>
+            </div>
+          )}
+
+          {mode === "single" && flow && (
             <>
               <div className="flow-summary">
                 <div>
@@ -399,6 +576,9 @@ export function FlowDrawer({
                     <span>ribbon width = residual write</span>
                     <span>opacity = cosine similarity</span>
                     <span>strands = dimension clusters · width = mass</span>
+                    {flow.layers.some((layer) => layer.ablation_kl !== null) && (
+                      <span>ring = ablation KL</span>
+                    )}
                     <span>colors = per-layer rank, not matched across layers</span>
                   </div>
                   <div className="flow-playback">
@@ -462,6 +642,22 @@ export function FlowDrawer({
                       steerResult={steerResult}
                       steerError={steerError}
                       onUseDirection={useInSteeringPanel}
+                      onProbe={() => {
+                        if (!selectedLayerData || !selectedClusterData) return;
+                        const components = selectedClusterData.components;
+                        onProbeCluster?.({
+                          prompt: flow.prompt,
+                          system: flow.system,
+                          steering: {
+                            module_id: selectedLayerData.module_id,
+                            strength: Number(clamp(alpha, -SIGMA_LIMIT, SIGMA_LIMIT).toFixed(6)),
+                            feature_index:
+                              components.length === 1 ? components[0].feature_index : null,
+                            components,
+                            normalization: "sigma",
+                          },
+                        });
+                      }}
                     />
                   ) : selectedLayerData ? (
                     <LayerInspector
@@ -480,6 +676,89 @@ export function FlowDrawer({
                       <p className="subtle">
                         Clusters are descriptive. A cluster says these dimensions moved together on this
                         trace; it is not evidence that the group controls a behaviour.
+                      </p>
+                    </div>
+                  )}
+                </aside>
+              </div>
+            </>
+          )}
+
+          {mode === "compare" && compareReady && leftFlow && rightFlow && (
+            <>
+              <div className="flow-summary">
+                <div>
+                  <span className="badge steerable-badge">A vs B</span>{" "}
+                  <span className="badge">{leftFlow.layers.length} layers</span>{" "}
+                  <span className="badge">A {leftFlow.tokens.length} positions</span>{" "}
+                  <span className="badge">B {rightFlow.tokens.length} positions</span>{" "}
+                  <span className="badge">k = {leftFlow.cluster_k}</span>
+                </div>
+                <div className="flow-compare-outputs">
+                  <div>
+                    <h4>A</h4>
+                    <p className="subtle">{leftFlow.prompt}</p>
+                    <pre className="output small">{leftFlow.output || "(no text generated)"}</pre>
+                  </div>
+                  <div>
+                    <h4>B</h4>
+                    <p className="subtle">{rightFlow.prompt}</p>
+                    <pre className="output small">{rightFlow.output || "(no text generated)"}</pre>
+                  </div>
+                </div>
+              </div>
+
+              {[...new Set([...leftFlow.warnings, ...rightFlow.warnings])].map((warning) => (
+                <div key={warning} className="warning-banner inline">
+                  {warning}
+                </div>
+              ))}
+
+              <div className="flow-main">
+                <div className="flow-graph-panel">
+                  <div className="flow-graph-head">
+                    <h3>Δ stream · B − A</h3>
+                    <span className="subtle">aggregated over every captured position</span>
+                  </div>
+                  <FlowDiffGraph
+                    left={leftFlow}
+                    right={rightFlow}
+                    selectedLayer={selectedLayer}
+                    onSelectLayer={selectLayer}
+                  />
+                  <div className="flow-legend">
+                    <span>ribbon width = |Δ residual write|</span>
+                    <span>
+                      <i className="flow-legend-swatch conv" /> B writes more
+                    </span>
+                    <span>
+                      <i className="flow-legend-swatch attention" /> A writes more
+                    </span>
+                    <span>ring = |Δ ablation KL|</span>
+                  </div>
+                  <p className="subtle flow-diff-note">
+                    Token playback and cluster strands live in Single mode; the diff aggregates
+                    positions because A and B have different token sequences.
+                  </p>
+                </div>
+
+                <aside className="flow-inspector" aria-live="polite">
+                  {leftLayerData && rightLayerData ? (
+                    <DiffLayerInspector
+                      left={leftFlow}
+                      right={rightFlow}
+                      leftLayer={leftLayerData}
+                      rightLayer={rightLayerData}
+                    />
+                  ) : (
+                    <div className="flow-inspector-inner">
+                      <h3>Pick a layer</h3>
+                      <p className="subtle">
+                        Click any layer marker to compare its A and B metrics. The table also shows
+                        the ablation delta when ablation was enabled.
+                      </p>
+                      <p className="subtle">
+                        Clusters are per trace: colors and ranks are not matched across A and B.
                       </p>
                     </div>
                   )}
@@ -535,6 +814,10 @@ function FlowGraph({
       : MAX_STEP;
   const width = LEFT * 2 + Math.max(0, flow.layers.length - 1) * step;
   const maxWrite = Math.max(1e-9, ...flow.edges.map((edge) => edge.write));
+  const maxAblation = Math.max(
+    1e-9,
+    ...flow.layers.map((layer) => layer.ablation_kl ?? 0),
+  );
   const token = clamp(tokenIndex, 0, Math.max(0, flow.tokens.length - 1));
   const xFor = (index: number) => LEFT + index * step;
 
@@ -687,7 +970,9 @@ function FlowGraph({
                   layer.mean_norm,
                 )} · write ${layer.layer_index === 0 ? "input" : metric(layer.write)} · cosine ${metric(
                   layer.similarity,
-                )}`}
+                )}${
+                  layer.ablation_kl !== null ? ` · ablation KL ${metric(layer.ablation_kl)}` : ""
+                }`}
               </title>
               <circle
                 cx={x}
@@ -706,6 +991,18 @@ function FlowGraph({
                 strokeLinecap="round"
                 opacity={selected ? 0.9 : 0.42}
               />
+              {layer.ablation_kl !== null && (
+                <circle
+                  cx={x}
+                  cy={CENTER_Y}
+                  r={12 + 12 * clamp(layer.ablation_kl / maxAblation, 0, 1)}
+                  fill="none"
+                  stroke="#af52de"
+                  strokeWidth={1.1}
+                  strokeDasharray="2 3"
+                  opacity={0.18 + 0.5 * clamp(layer.ablation_kl / maxAblation, 0, 1)}
+                />
+              )}
               <circle
                 cx={x}
                 cy={CENTER_Y}
@@ -811,6 +1108,330 @@ function FlowGraph({
   );
 }
 
+function FlowDiffGraph({
+  left,
+  right,
+  selectedLayer,
+  onSelectLayer,
+}: {
+  left: FlowResponse;
+  right: FlowResponse;
+  selectedLayer: number | null;
+  onSelectLayer: (layerIndex: number) => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [available, setAvailable] = useState(0);
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    const update = () => setAvailable(element.clientWidth);
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  const layerCount = Math.min(left.layers.length, right.layers.length);
+  const step =
+    available > 0
+      ? clamp((available - LEFT * 2) / Math.max(1, layerCount - 1), MIN_STEP, MAX_STEP)
+      : MAX_STEP;
+  const width = LEFT * 2 + Math.max(0, layerCount - 1) * step;
+  const xFor = (index: number) => LEFT + index * step;
+  const deltaWrite = (index: number) =>
+    Math.abs(right.layers[index].write - left.layers[index].write);
+  const maxDeltaWrite = Math.max(
+    1e-9,
+    ...Array.from({ length: Math.max(0, layerCount - 1) }, (_, index) => deltaWrite(index + 1)),
+  );
+  const deltaAblation = (index: number) => {
+    const a = left.layers[index].ablation_kl;
+    const b = right.layers[index].ablation_kl;
+    return a === null || b === null ? null : b - a;
+  };
+  const maxDeltaAblation = Math.max(
+    1e-9,
+    ...Array.from({ length: layerCount }, (_, index) => Math.abs(deltaAblation(index) ?? 0)),
+  );
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container || selectedLayer === null) return;
+    const node = container.querySelector<SVGGElement>('[data-selected="true"]');
+    if (!node) return;
+    const nodeRect = node.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    if (nodeRect.left < containerRect.left || nodeRect.right > containerRect.right) {
+      node.scrollIntoView?.({ block: "nearest", inline: "center" });
+    }
+  }, [selectedLayer, step]);
+
+  const curve = (x1: number, x2: number) =>
+    `M ${x1} ${CENTER_Y} C ${x1 + step * 0.38} ${CENTER_Y}, ${
+      x2 - step * 0.38
+    } ${CENTER_Y}, ${x2} ${CENTER_Y}`;
+
+  const ribbon = (x1: number, x2: number, widthStart: number, widthEnd: number) => {
+    const top = `M ${x1} ${CENTER_Y - widthStart / 2} C ${x1 + step * 0.38} ${
+      CENTER_Y - widthStart / 2
+    }, ${x2 - step * 0.38} ${CENTER_Y - widthEnd / 2}, ${x2} ${CENTER_Y - widthEnd / 2}`;
+    const bottom = `L ${x2} ${CENTER_Y + widthEnd / 2} C ${x2 - step * 0.38} ${
+      CENTER_Y + widthEnd / 2
+    }, ${x1 + step * 0.38} ${CENTER_Y + widthStart / 2}, ${x1} ${
+      CENTER_Y + widthStart / 2
+    } Z`;
+    return `${top} ${bottom}`;
+  };
+
+  return (
+    <div className="flow-graph-scroll" ref={scrollRef}>
+      <svg
+        className="flow-svg"
+        width={width}
+        height={GRAPH_HEIGHT}
+        role="group"
+        aria-label={`Flow diff graph with ${layerCount} layers; B minus A`}
+      >
+        <rect
+          x={LEFT - 8}
+          y={CENTER_Y - 32}
+          width={Math.max(0, width - LEFT * 2 + 16)}
+          height={64}
+          rx={32}
+          fill="rgba(0, 0, 0, 0.018)"
+        />
+
+        {Array.from({ length: Math.max(0, layerCount - 1) }, (_, edgeIndex) => {
+          const index = edgeIndex + 1;
+          const delta = right.layers[index].write - left.layers[index].write;
+          const widthEnd = 1 + 12 * (Math.abs(delta) / maxDeltaWrite);
+          const previous = index > 1 ? deltaWrite(index - 1) : Math.abs(delta);
+          const widthStart = 1 + 12 * (previous / maxDeltaWrite);
+          const color = delta >= 0 ? CONV_COLOR : "#ff9500";
+          const x1 = xFor(index - 1) + 4;
+          const x2 = xFor(index) - 4;
+          return (
+            <g key={`diff-${index}`}>
+              <path
+                d={ribbon(x1, x2, widthStart, widthEnd)}
+                fill={color}
+                opacity={0.2 + 0.35 * clamp(Math.abs(delta) / maxDeltaWrite, 0, 1)}
+              />
+              <path d={curve(x1, x2)} fill="none" stroke={color} strokeWidth={1} opacity={0.35} />
+              <path
+                className="flow-dash"
+                d={curve(x1, x2)}
+                fill="none"
+                stroke={color}
+                strokeWidth={1.5}
+                strokeLinecap="round"
+                strokeDasharray="2 12"
+                opacity={0.55}
+                style={{ animationDelay: `${-(edgeIndex % 7) * 0.18}s` }}
+              />
+            </g>
+          );
+        })}
+
+        {Array.from({ length: layerCount }, (_, index) => {
+          const layer = left.layers[index];
+          const other = right.layers[index];
+          const x = xFor(index);
+          const color = operatorColor(layer);
+          const selected = selectedLayer === layer.layer_index;
+          const ablation = deltaAblation(index);
+          return (
+            <g
+              key={`diff-node-${index}`}
+              className={`flow-node ${selected ? "selected" : ""}`}
+              data-selected={selected ? "true" : undefined}
+              role="button"
+              tabIndex={0}
+              aria-label={`Layer ${layer.layer_index}, A ${layer.operator_type}, write A ${metric(
+                layer.write,
+              )}, write B ${metric(other.write)}`}
+              onClick={() => onSelectLayer(layer.layer_index)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onSelectLayer(layer.layer_index);
+                }
+              }}
+            >
+              <title>
+                {`Layer ${layer.layer_index} · write A ${metric(layer.write)} → B ${metric(
+                  other.write,
+                )} · ablation ${
+                  layer.ablation_kl === null || other.ablation_kl === null
+                    ? "—"
+                    : `${metric(layer.ablation_kl)} → ${metric(other.ablation_kl)}`
+                }`}
+              </title>
+              <line
+                x1={x}
+                y1={CENTER_Y - 40}
+                x2={x}
+                y2={CENTER_Y + 40}
+                stroke={color}
+                strokeWidth={1.2}
+                strokeLinecap="round"
+                opacity={selected ? 0.9 : 0.42}
+              />
+              {ablation !== null && (
+                <circle
+                  cx={x}
+                  cy={CENTER_Y}
+                  r={12 + 12 * clamp(Math.abs(ablation) / maxDeltaAblation, 0, 1)}
+                  fill="none"
+                  stroke={ablation >= 0 ? CONV_COLOR : "#ff9500"}
+                  strokeWidth={1.1}
+                  strokeDasharray="2 3"
+                  opacity={0.18 + 0.5 * clamp(Math.abs(ablation) / maxDeltaAblation, 0, 1)}
+                />
+              )}
+              <circle
+                cx={x}
+                cy={CENTER_Y}
+                r={selected ? 5 : 3.6}
+                fill={color}
+                stroke="var(--surface)"
+                strokeWidth={1.5}
+              />
+              {selected && (
+                <circle
+                  cx={x}
+                  cy={CENTER_Y}
+                  r={9}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={1.2}
+                  opacity={0.7}
+                />
+              )}
+              <rect x={x - 11} y={CENTER_Y - 54} width={22} height={108} fill="transparent" />
+              <text x={x} y={CENTER_Y - 74} textAnchor="middle" className="flow-node-type">
+                {layer.operator_type === "attention" ? "A" : "C"}
+              </text>
+              <text x={x} y={CENTER_Y + 82} textAnchor="middle" className="flow-node-index">
+                {layer.layer_index}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function DiffLayerInspector({
+  left,
+  right,
+  leftLayer,
+  rightLayer,
+}: {
+  left: FlowResponse;
+  right: FlowResponse;
+  leftLayer: FlowLayer;
+  rightLayer: FlowLayer;
+}) {
+  const topMass = (layer: FlowLayer) =>
+    layer.clusters.length === 0 ? null : Math.max(...layer.clusters.map((cluster) => cluster.mass));
+  const rows: {
+    label: string;
+    a: number | null;
+    b: number | null;
+    format: (value: number) => string;
+    delta: (a: number, b: number) => string;
+  }[] = [
+    {
+      label: "mean norm",
+      a: leftLayer.mean_norm,
+      b: rightLayer.mean_norm,
+      format: metric,
+      delta: (a, b) => metric(b - a),
+    },
+    {
+      label: "residual write",
+      a: leftLayer.write,
+      b: rightLayer.write,
+      format: metric,
+      delta: (a, b) => metric(b - a),
+    },
+    {
+      label: "cosine to prev",
+      a: leftLayer.similarity,
+      b: rightLayer.similarity,
+      format: metric,
+      delta: (a, b) => metric(b - a),
+    },
+    {
+      label: "gain",
+      a: leftLayer.gain,
+      b: rightLayer.gain,
+      format: metric,
+      delta: (a, b) => metric(b - a),
+    },
+    {
+      label: "ablation KL",
+      a: leftLayer.ablation_kl,
+      b: rightLayer.ablation_kl,
+      format: metric,
+      delta: (a, b) => metric(b - a),
+    },
+    {
+      label: "clusters",
+      a: leftLayer.clusters.length,
+      b: rightLayer.clusters.length,
+      format: (value) => String(Math.round(value)),
+      delta: (a, b) => `${b - a >= 0 ? "+" : ""}${Math.round(b - a)}`,
+    },
+    {
+      label: "top cluster mass",
+      a: topMass(leftLayer),
+      b: topMass(rightLayer),
+      format: percent,
+      delta: (a, b) => `${(b - a) * 100 >= 0 ? "+" : ""}${((b - a) * 100).toFixed(1)} pp`,
+    },
+  ];
+  return (
+    <div className="flow-inspector-inner">
+      <h3>Layer {leftLayer.layer_index} · B − A</h3>
+      <p className="subtle">
+        <strong>A</strong> {left.prompt}
+      </p>
+      <p className="subtle">
+        <strong>B</strong> {right.prompt}
+      </p>
+      <table className="data-table flow-diff-table">
+        <thead>
+          <tr>
+            <th>metric</th>
+            <th>A</th>
+            <th>B</th>
+            <th>Δ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.label}>
+              <td>{row.label}</td>
+              <td>{row.a === null ? "—" : row.format(row.a)}</td>
+              <td>{row.b === null ? "—" : row.format(row.b)}</td>
+              <td>{row.a === null || row.b === null ? "—" : row.delta(row.a, row.b)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="subtle">
+        Δ = B − A. Clusters are per trace: colors and ranks are not matched across A and B. Ablation
+        is the next-token KL when that layer’s contribution is skipped on the prompt prefill (the residual is preserved).
+      </p>
+    </div>
+  );
+}
+
 function LayerInspector({
   layer,
   onSelectCluster,
@@ -849,6 +1470,12 @@ function LayerInspector({
           <dt>clusters</dt>
           <dd>{layer.clusters.length}</dd>
         </div>
+        {layer.ablation_kl !== null && (
+          <div>
+            <dt>ablation KL</dt>
+            <dd>{metric(layer.ablation_kl)}</dd>
+          </div>
+        )}
       </dl>
       <h4>Dimension clusters</h4>
       <div className="flow-cluster-list">
@@ -887,6 +1514,7 @@ function ClusterInspector({
   steerResult,
   steerError,
   onUseDirection,
+  onProbe,
 }: {
   flow: FlowResponse;
   layer: FlowLayer;
@@ -899,6 +1527,7 @@ function ClusterInspector({
   steerResult: SteeringResponse | null;
   steerError: string | null;
   onUseDirection: () => void;
+  onProbe: () => void;
 }) {
   const peak = tokenAt(flow.tokens, cluster.peak_position);
   const changed = Boolean(
@@ -998,9 +1627,14 @@ function ClusterInspector({
             )}
           </div>
         )}
-        <button type="button" className="secondary" onClick={onUseDirection}>
-          Use these dimensions in the steering panel
-        </button>
+        <div className="button-row">
+          <button type="button" className="secondary" onClick={onProbe}>
+            Probe next token
+          </button>
+          <button type="button" className="secondary" onClick={onUseDirection}>
+            Use these dimensions in the steering panel
+          </button>
+        </div>
       </fieldset>
     </div>
   );

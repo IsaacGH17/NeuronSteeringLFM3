@@ -507,6 +507,7 @@ export interface FlowLayer {
   energy: number[];
   delta: number[];
   clusters: FlowCluster[];
+  ablation_kl: number | null;
 }
 
 export interface FlowEdge {
@@ -523,6 +524,7 @@ export interface FlowRequest {
   settings: GenerationSettings;
   cluster_k?: number;
   cluster_max_positions?: number;
+  include_ablation?: boolean;
 }
 
 export interface FlowResponse {
@@ -539,5 +541,171 @@ export interface FlowResponse {
   cluster_k: number;
   cluster_positions: number;
   settings: GenerationSettings;
+  warnings: string[];
+}
+
+export interface TokenProbability {
+  token_id: number;
+  text: string;
+  probability: number;
+}
+
+export interface NextTokenDistribution {
+  tokens: TokenProbability[];
+  entropy: number;
+}
+
+export interface NextTokenCandidate {
+  token_id: number;
+  text: string;
+  baseline_probability: number;
+  steered_probability: number | null;
+  delta: number | null;
+}
+
+export interface NextTokenRequest {
+  prompt: string;
+  system?: string | null;
+  enable_thinking?: boolean;
+  top_k?: number;
+  steering?: SteeringSpec | null;
+}
+
+export interface NextTokenResponse {
+  prompt: string;
+  system: string | null;
+  model_id: string;
+  device: string;
+  prompt_tokens: number;
+  position: number;
+  top_k: number;
+  baseline: NextTokenDistribution;
+  steered: NextTokenDistribution | null;
+  candidates: NextTokenCandidate[];
+  kl_divergence: number | null;
+  steering: SteeringSpec | null;
+  duration_ms: number;
+  warnings: string[];
+}
+
+export interface ProbeSeed {
+  prompt: string;
+  system: string | null;
+  steering: SteeringSpec | null;
+}
+
+export interface PatchSweepRequest {
+  recipient_prompt: string;
+  recipient_system?: string | null;
+  donor_prompt: string;
+  donor_system?: string | null;
+  settings: GenerationSettings;
+  layer_indices?: number[];
+  positions?: number[];
+}
+
+export interface PatchSweepCell {
+  layer_index: number;
+  module_id: string;
+  position: number;
+  donor_position: number;
+  patched_output: string;
+  changed: boolean;
+  first_token_changed: boolean;
+  common_prefix_tokens: number;
+  generated_tokens: number;
+  warnings: string[];
+}
+
+export interface PatchSweepResponse {
+  recipient_prompt: string;
+  donor_prompt: string;
+  baseline_output: string;
+  donor_output: string;
+  prompt_tokens: number;
+  donor_prompt_tokens: number;
+  layers: number[];
+  positions: number[];
+  cells: PatchSweepCell[];
+  duration_ms: number;
+  warnings: string[];
+}
+
+export interface NeuronTop {
+  neuron: number;
+  weight: number;
+  mean_abs: number;
+  sigma: number;
+}
+
+export interface NeuronCluster {
+  id: number;
+  size: number;
+  mass: number;
+  cohesion: number;
+  peak_position: number;
+  top_neurons: NeuronTop[];
+  profile: number[];
+  profile_positions: number[];
+}
+
+export interface NeuronTraceRequest {
+  prompt: string;
+  system?: string | null;
+  settings: GenerationSettings;
+  layer_index?: number;
+  cluster_k?: number;
+  cluster_max_positions?: number;
+}
+
+export interface NeuronTraceResponse {
+  experiment_id: string;
+  prompt: string;
+  system: string | null;
+  output: string;
+  tokens: TokenInfo[];
+  prompt_tokens: number;
+  generated_tokens: number;
+  layer_index: number;
+  layer_type: string;
+  intermediate_size: number;
+  hidden_size: number;
+  residual_rms: number;
+  clusters: NeuronCluster[];
+  top_neurons: NeuronTop[];
+  assignments: number[];
+  cluster_positions: number;
+  warnings: string[];
+}
+
+export interface NeuronComponent {
+  neuron: number;
+  weight: number;
+}
+
+export interface NeuronDelta {
+  neuron: number;
+  delta: number;
+}
+
+export interface NeuronSteeringRequest {
+  prompt: string;
+  system?: string | null;
+  settings: GenerationSettings;
+  layer_index: number;
+  neurons: NeuronComponent[];
+  alpha: number;
+}
+
+export interface NeuronSteeringResponse {
+  layer_index: number;
+  alpha: number;
+  neurons: NeuronComponent[];
+  direction_norm: number;
+  residual_rms: number;
+  deltas: NeuronDelta[];
+  baseline: BaselineResponse;
+  steered: BaselineResponse;
+  duration_ms: number;
   warnings: string[];
 }
