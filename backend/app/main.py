@@ -9,7 +9,8 @@ from fastapi.staticfiles import StaticFiles
 from backend.app.api.routes import router
 from backend.app.core.settings import settings
 from backend.app.core.version import APP_VERSION
-from backend.app.services.experiment_store import ExperimentStore
+from backend.app.services.experiment_store import ExperimentStore, make_experiment_store
+from backend.app.services.jobs import BatchJobRegistry
 from backend.app.services.model_loader import ModelManager
 
 
@@ -23,10 +24,8 @@ def create_app(
         description="Inspect and steer activations of LiquidAI/LFM3-1.7B during inference.",
     )
     app.state.manager = manager or ModelManager()
-    app.state.experiment_store = experiment_store or ExperimentStore(
-        data_dir=settings.data_dir,
-        persist_activations_default=settings.persist_activations,
-    )
+    app.state.experiment_store = experiment_store or make_experiment_store(settings)
+    app.state.batch_jobs = BatchJobRegistry(app.state.manager, app.state.experiment_store)
 
     app.add_middleware(
         CORSMiddleware,

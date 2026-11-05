@@ -13,7 +13,12 @@ export function DiagnosticsPanel({ diagnostics }: { diagnostics: Diagnostics | n
   return (
     <section className={`diagnostics ${open ? "open" : ""}`}>
       <button className="diagnostics-toggle" onClick={() => setOpen((value) => !value)}>
-        <span>{open ? "▾" : "▸"} Diagnostics & environment</span>
+        <span>
+          <span className="disclosure" aria-hidden="true">
+            {open ? "▾" : "▸"}
+          </span>{" "}
+          Diagnostics &amp; environment
+        </span>
         {diagnostics && (
           <span className="subtle">
             {diagnostics.backend} · {diagnostics.device_name ?? "no accelerator"} · model{" "}

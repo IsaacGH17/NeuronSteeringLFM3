@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   listExperiments: vi.fn(),
   getExperiment: vi.fn(),
   downloadExport: vi.fn(),
+  computeDirection: vi.fn(),
 }));
 
 vi.mock("../api/client", () => api);
@@ -41,6 +42,7 @@ beforeEach(() => {
     ),
   );
   api.downloadExport.mockReset();
+  api.computeDirection.mockReset();
 });
 
 function renderHistory(onOpenActivations = noop) {
@@ -60,7 +62,7 @@ describe("ExperimentHistory", () => {
     await user.click(screen.getByRole("button", { name: /Experiment history/ }));
     expect(
       await screen.findByText(
-        "No saved experiments yet. Run a baseline, steered, or sweep experiment to build history.",
+        "Nothing saved yet. Run a baseline, steered, or sweep experiment and it will land here.",
       ),
     ).toBeInTheDocument();
   });
@@ -164,5 +166,95 @@ describe("ExperimentHistory", () => {
     await waitFor(() =>
       expect(api.listExperiments).toHaveBeenLastCalledWith({ limit: 20, offset: 20 }),
     );
+  });
+
+  it("builds a steering direction from the two selected runs", async () => {
+    const user = userEvent.setup();
+    const onDirectionBuilt = vi.fn();
+    const withCaptures = summaryFixture({
+      id: "c".repeat(32),
+      prompt_preview: "Warm run",
+      has_activations: true,
+      activation_source: "live",
+    });
+    const alsoCaptured = summaryFixture({
+      id: "d".repeat(32),
+      prompt_preview: "Clinical run",
+      condition: "steered",
+      has_activations: true,
+      activation_source: "live",
+    });
+    api.listExperiments.mockResolvedValue({
+      total: 2,
+      offset: 0,
+      limit: 20,
+      items: [withCaptures, alsoCaptured],
+    });
+    api.computeDirection.mockResolvedValue({
+      module_id: "model.layers.0.feed_forward",
+      components: [{ feature_index: 3, weight: 1 }],
+      sigma: [0.25],
+      norm: 1.1,
+      separation: 2.4,
+      positions_compared: 6,
+      warnings: [],
+    });
+
+    render(
+      <ExperimentHistory
+        refreshTrigger={0}
+        onOpenActivations={noop}
+        onDirectionBuilt={onDirectionBuilt}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /Experiment history/ }));
+
+    await user.click(await screen.findByLabelText(`Select ${withCaptures.id} for comparison`));
+    await user.click(screen.getByLabelText(`Select ${alsoCaptured.id} for comparison`));
+    await user.click(screen.getByRole("button", { name: "Build direction" }));
+
+    await waitFor(() => expect(onDirectionBuilt).toHaveBeenCalled());
+    expect(api.computeDirection).toHaveBeenCalledWith({
+      positive_experiment_id: withCaptures.id,
+      negative_experiment_id: alsoCaptured.id,
+      top_k: 8,
+    });
+  });
+
+  it("reports a failed direction build without clearing the comparison", async () => {
+    const user = userEvent.setup();
+    const onDirectionBuilt = vi.fn();
+    const withCaptures = summaryFixture({
+      id: "e".repeat(32),
+      has_activations: true,
+      activation_source: "live",
+    });
+    const other = summaryFixture({
+      id: "f".repeat(32),
+      has_activations: true,
+      activation_source: "live",
+    });
+    api.listExperiments.mockResolvedValue({
+      total: 2,
+      offset: 0,
+      limit: 20,
+      items: [withCaptures, other],
+    });
+    api.computeDirection.mockRejectedValue(new Error("The two captured states are identical"));
+
+    render(
+      <ExperimentHistory
+        refreshTrigger={0}
+        onOpenActivations={noop}
+        onDirectionBuilt={onDirectionBuilt}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /Experiment history/ }));
+    await user.click(await screen.findByLabelText(`Select ${withCaptures.id} for comparison`));
+    await user.click(screen.getByLabelText(`Select ${other.id} for comparison`));
+    await user.click(screen.getByRole("button", { name: "Build direction" }));
+
+    expect(await screen.findByText("The two captured states are identical")).toBeInTheDocument();
+    expect(onDirectionBuilt).not.toHaveBeenCalled();
   });
 });

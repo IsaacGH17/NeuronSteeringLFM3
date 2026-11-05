@@ -1,7 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   BaselineResponse,
+  BatchJob,
+  BatchRequest,
+  DirectionResponse,
   GenerationSettings,
+  ModulePreset,
+  PromptSuite,
+  SteeringComponent,
+  SteeringNormalization,
   SteeringResponse,
   SteeringSpec,
   SweepResponse,
@@ -39,7 +46,9 @@ interface Props {
     system: string | null;
     settings: GenerationSettings;
     module_id: string;
-    feature_index: number;
+    feature_index: number | null;
+    components?: SteeringComponent[];
+    normalization?: SteeringNormalization;
     strengths: number[];
     include_control: boolean;
     control_seed: number | null;
@@ -47,31 +56,48 @@ interface Props {
     capture_module_ids: string[];
     persist_activations: boolean | null;
   }) => void;
+  direction?: DirectionResponse | null;
+  onClearDirection?: () => void;
+  modulePresets?: ModulePreset[];
+  suites?: PromptSuite[];
+  batchJob?: BatchJob | null;
+  batchError?: string | null;
+  onStartBatch?: (payload: BatchRequest) => void;
+  onCancelBatch?: () => void;
 }
 
-type Mode = "baseline" | "steered" | "sweep";
+type Mode = "baseline" | "steered" | "sweep" | "batch";
 
 const MODES: Record<Mode, { label: string; runLabel: string; hint: string }> = {
   baseline: {
     label: "Baseline",
     runLabel: "Run baseline",
-    hint: "One unmodified generation. Use it as the reference for everything else.",
+    hint: "A plain generation with nothing touched. It is the reference for everything else.",
   },
   steered: {
     label: "Steered",
     runLabel: "Run baseline + steered",
-    hint: "Runs a baseline and a steered copy with the same prompt, settings, and seed.",
+    hint: "Two generations, plain and steered, with the same prompt, settings, and seed.",
   },
   sweep: {
     label: "Sweep",
     runLabel: "Run sweep",
-    hint: "Runs one shared baseline plus a steered run for each strength and an optional random control.",
+    hint: "One shared baseline, then one steered run per strength, plus an optional random control.",
+  },
+  batch: {
+    label: "Batch",
+    runLabel: "Start batch",
+    hint: "A whole matrix — prompt suite × modules × strengths — with live progress and cancellation.",
   },
 };
 
 const DEFAULT_PROMPT = "Explain what a transformer activation is in two sentences.";
 const DEFAULT_STRENGTHS = "-20,-10,0,10,20";
-const STRENGTH_LIMIT = 49.5;
+const DEFAULT_BATCH_STRENGTHS = "-2,-1,0,1,2";
+const RAW_LIMIT = 1000;
+const SIGMA_LIMIT = 20;
+const SLIDER_LIMIT = 50;
+const SIGMA_SLIDER_LIMIT = 10;
 
 export function GenerationPanel({
   disabled,
@@ -88,6 +114,14 @@ export function GenerationPanel({
   onRun,
   onRunSteered,
   onRunSweep,
+  direction = null,
+  onClearDirection,
+  modulePresets = [],
+  suites = [],
+  batchJob = null,
+  batchError = null,
+  onStartBatch,
+  onCancelBatch,
 }: Props) {
   const [mode, setMode] = useState<Mode>("baseline");
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
@@ -101,6 +135,10 @@ export function GenerationPanel({
   const [persistActivations, setPersistActivations] = useState(false);
   const [featureIndex, setFeatureIndex] = useState(0);
   const [strength, setStrength] = useState(0);
+  const [normalization, setNormalization] = useState<SteeringNormalization>("raw");
+  const [components, setComponents] = useState<SteeringComponent[]>([]);
+  const [newDimension, setNewDimension] = useState(0);
+  const [newWeight, setNewWeight] = useState(1);
 
   const [sweepFeatureIndex, setSweepFeatureIndex] = useState(0);
   const [strengthsText, setStrengthsText] = useState(DEFAULT_STRENGTHS);
@@ -110,25 +148,51 @@ export function GenerationPanel({
   const [sweepRunning, setSweepRunning] = useState(false);
   const [sweepLocalError, setSweepLocalError] = useState<string | null>(null);
 
+  const [suiteId, setSuiteId] = useState("");
+  const [presetId, setPresetId] = useState("");
+  const [layerFrom, setLayerFrom] = useState(0);
+  const [layerTo, setLayerTo] = useState(999);
+  const [batchStrengthsText, setBatchStrengthsText] = useState(DEFAULT_BATCH_STRENGTHS);
+  const [batchRepeats, setBatchRepeats] = useState(1);
+  const [batchControl, setBatchControl] = useState(false);
+  const [batchBaseline, setBatchBaseline] = useState(true);
+  const [batchLocalError, setBatchLocalError] = useState<string | null>(null);
+
   useEffect(() => {
     if (sweepResult || sweepError) {
       setSweepRunning(false);
     }
   }, [sweepResult, sweepError]);
 
+  useEffect(() => {
+    if (direction) {
+      setComponents(direction.components);
+      setNormalization("sigma");
+    }
+  }, [direction]);
+
+  useEffect(() => {
+    if (!presetId && modulePresets.length > 0) {
+      setPresetId(modulePresets[0].id);
+    }
+  }, [modulePresets, presetId]);
+
   const featureMax = hiddenSize !== null ? hiddenSize - 1 : 2047;
   const clampFeature = (value: number) =>
     Math.max(0, Math.min(featureMax, Math.round(Number.isFinite(value) ? value : 0)));
+  const strengthLimit = normalization === "raw" ? RAW_LIMIT : SIGMA_LIMIT;
   const clampStrength = (value: number) =>
-    Math.max(-STRENGTH_LIMIT, Math.min(STRENGTH_LIMIT, Number.isFinite(value) ? value : 0));
+    Math.max(-strengthLimit, Math.min(strengthLimit, Number.isFinite(value) ? value : 0));
 
   const clampedFeature = clampFeature(featureIndex);
   const clampedSweepFeature = clampFeature(sweepFeatureIndex);
   const clampedStrength = clampStrength(strength);
+  const clampedNewDimension = clampFeature(newDimension);
   const featureClamped = clampedFeature !== Math.round(Number.isFinite(featureIndex) ? featureIndex : 0);
   const sweepFeatureClamped =
     clampedSweepFeature !== Math.round(Number.isFinite(sweepFeatureIndex) ? sweepFeatureIndex : 0);
   const strengthClamped = clampedStrength !== strength;
+  const multiDim = components.length > 0;
 
   const buildSettings = (): GenerationSettings => ({
     max_new_tokens: Math.max(1, Math.min(4096, Math.round(maxNewTokens))),
@@ -146,6 +210,25 @@ export function GenerationPanel({
     persistActivations,
   });
 
+  const steeringPayload = (moduleId: string): SteeringSpec => {
+    if (multiDim) {
+      return {
+        module_id: moduleId,
+        strength: Number(clampedStrength.toFixed(6)),
+        feature_index: components.length === 1 ? components[0].feature_index : null,
+        components,
+        normalization,
+      };
+    }
+    const single: SteeringSpec = {
+      module_id: moduleId,
+      feature_index: clampedFeature,
+      strength: Number(clampedStrength.toFixed(6)),
+    };
+    if (normalization !== "raw") single.normalization = normalization;
+    return single;
+  };
+
   const submit = () => {
     if (!prompt.trim() || disabled || running) return;
     const { promptText, systemText, settings, captures, persistActivations: persist } = sharedArgs();
@@ -153,96 +236,210 @@ export function GenerationPanel({
   };
 
   const submitSteered = () => {
-    if (!prompt.trim() || disabled || running || !steeringTargetId) return;
+    if (!prompt.trim() || disabled || running || !steeringTargetId || !targetReadyNow()) return;
     const { promptText, systemText, settings, captures, persistActivations: persist } = sharedArgs();
     onRunSteered(
       promptText,
       systemText,
       settings,
-      {
-        module_id: steeringTargetId,
-        feature_index: clampedFeature,
-        strength: Number(clampedStrength.toFixed(6)),
-      },
+      steeringPayload(steeringTargetId),
       captures,
       persist,
     );
   };
 
-  const parseStrengths = (): { strengths: number[]; error: string | null } => {
-    const parts = strengthsText
+  const parseStrengths = (text: string): { strengths: number[]; error: string | null } => {
+    const parts = text
       .split(",")
       .map((part) => part.trim())
       .filter((part) => part !== "");
-    const strengths: number[] = [];
+    const values: number[] = [];
     for (const part of parts) {
       const value = Number(part);
       if (!Number.isFinite(value)) {
         return { strengths: [], error: `Invalid strength: "${part}"` };
       }
-      strengths.push(value);
+      values.push(value);
     }
-    if (strengths.length === 0) return { strengths: [], error: "Enter at least one strength." };
-    if (strengths.length > 9) return { strengths: [], error: "At most 9 strengths allowed." };
-    return { strengths, error: null };
+    if (values.length === 0) return { strengths: [], error: "Enter at least one strength." };
+    if (values.length > 32) return { strengths: [], error: "At most 32 strengths allowed." };
+    return { strengths: values, error: null };
   };
 
   const submitSweep = () => {
-    if (!prompt.trim() || disabled || sweepRunning || !steeringTargetId) return;
-    const { strengths, error: parseError } = parseStrengths();
+    if (!prompt.trim() || disabled || sweepRunning || !steeringTargetId || !targetReadyNow()) return;
+    const { strengths, error: parseError } = parseStrengths(strengthsText);
     if (parseError) {
       setSweepLocalError(parseError);
       return;
     }
     setSweepLocalError(null);
-    const clampedRepeats = Math.max(1, Math.min(3, Math.round(repeats)));
+    const clampedRepeats = Math.max(1, Math.min(10, Math.round(repeats)));
     const controlSeedValue =
       Number.isFinite(Number(controlSeed)) && controlSeed.trim() !== "" ? Number(controlSeed) : null;
     setSweepRunning(true);
+    const { promptText, systemText, settings, captures, persistActivations: persist } = sharedArgs();
     onRunSweep({
-      prompt,
-      system: system.trim() === "" ? null : system,
-      settings: buildSettings(),
+      prompt: promptText,
+      system: systemText,
+      settings,
       module_id: steeringTargetId,
-      feature_index: clampedSweepFeature,
+      feature_index: multiDim ? null : clampedFeature,
+      ...(multiDim
+        ? { components, normalization }
+        : normalization === "raw"
+          ? {}
+          : { normalization }),
       strengths,
       include_control: includeControl,
       control_seed: controlSeedValue,
       repeats: clampedRepeats,
-      capture_module_ids: captureEnabled && selectedSteerableId ? [selectedSteerableId] : [],
-      persist_activations: persistActivations,
+      capture_module_ids: captures,
+      persist_activations: persist,
     });
+  };
+
+  const selectedPreset = useMemo(
+    () => modulePresets.find((preset) => preset.id === presetId) ?? modulePresets[0] ?? null,
+    [modulePresets, presetId],
+  );
+  const selectedSuite = useMemo(
+    () => suites.find((suite) => suite.id === suiteId) ?? null,
+    [suites, suiteId],
+  );
+  const batchModules = useMemo(
+    () =>
+      (selectedPreset?.modules ?? []).filter(
+        (module) => module.layer_index >= layerFrom && module.layer_index <= layerTo,
+      ),
+    [selectedPreset, layerFrom, layerTo],
+  );
+
+  const batchPlan = useMemo(() => {
+    const parsed = parseStrengths(batchStrengthsText);
+    const strengths = parsed.strengths;
+    const promptCount = selectedSuite ? selectedSuite.prompts.length : 1;
+    const perPrompt = strengths.length + (batchControl ? 1 : 0);
+    const total =
+      promptCount * (batchBaseline ? 1 : 0) +
+      promptCount * batchModules.length * perPrompt * Math.max(1, Math.round(batchRepeats));
+    return { strengths, error: parsed.error, promptCount, total };
+  }, [batchStrengthsText, batchModules.length, batchBaseline, batchControl, batchRepeats, selectedSuite]);
+
+  const submitBatch = () => {
+    if (!steeringTargetId || disabled || !onStartBatch) return;
+    if (!selectedSuite && !prompt.trim()) return;
+    const { strengths, error: parseError } = batchPlan;
+    if (parseError) {
+      setBatchLocalError(parseError);
+      return;
+    }
+    if (batchModules.length === 0) {
+      setBatchLocalError("No modules in that layer range.");
+      return;
+    }
+    if (batchPlan.total === 0) {
+      setBatchLocalError("This plan would run nothing. Enable the baseline or add strengths.");
+      return;
+    }
+    setBatchLocalError(null);
+    const { systemText, settings, captures, persistActivations: persist } = sharedArgs();
+    const planComponents: SteeringComponent[] = multiDim
+      ? components
+      : [{ feature_index: clampedFeature, weight: 1 }];
+    onStartBatch({
+      suite_id: selectedSuite ? selectedSuite.id : null,
+      prompts: selectedSuite ? [] : [prompt],
+      system: systemText,
+      settings,
+      plan: {
+        module_ids: batchModules.map((module) => module.module_id),
+        components: planComponents,
+        normalization,
+        strengths,
+        include_control: batchControl,
+        control_seed: null,
+        repeats: Math.max(1, Math.min(10, Math.round(batchRepeats))),
+        baseline_per_prompt: batchBaseline,
+      },
+      capture_module_ids: captures,
+      persist_activations: persist,
+    });
+  };
+
+  function targetReadyNow(): boolean {
+    return Boolean(steeringTargetId) && (multiDim ? components.length > 0 : true);
+  }
+
+  const addComponent = () => {
+    const index = clampedNewDimension;
+    const weight = Number.isFinite(newWeight) ? newWeight : 1;
+    setComponents((current) => {
+      const existing = current.find((component) => component.feature_index === index);
+      if (existing) {
+        return current.map((component) =>
+          component.feature_index === index
+            ? { ...component, weight: Number((component.weight + weight).toFixed(6)) }
+            : component,
+        );
+      }
+      return [...current, { feature_index: index, weight }];
+    });
+  };
+
+  const removeComponent = (index: number) => {
+    setComponents((current) => current.filter((component) => component.feature_index !== index));
+    if (components.length <= 1 && onClearDirection) onClearDirection();
+  };
+
+  const clearDirection = () => {
+    setComponents([]);
+    if (onClearDirection) onClearDirection();
   };
 
   const runCurrent = () => {
     if (mode === "baseline") submit();
     else if (mode === "steered") submitSteered();
-    else submitSweep();
+    else if (mode === "sweep") submitSweep();
+    else submitBatch();
   };
 
+  const batchBusy = Boolean(batchJob && (batchJob.state === "queued" || batchJob.state === "running"));
   const promptReady = prompt.trim().length > 0;
-  const targetReady = Boolean(steeringTargetId);
-  const busy = running || (mode === "sweep" && sweepRunning);
-  const canRun = !disabled && promptReady && !busy && (mode === "baseline" || targetReady);
-  const runLabel = busy ? (mode === "sweep" ? "Running sweep…" : "Generating…") : MODES[mode].runLabel;
+  const targetReady = targetReadyNow();
+  const busy = running || (mode === "sweep" && sweepRunning) || (mode === "batch" && batchBusy);
+  const promptSourceReady = mode === "batch" ? Boolean(selectedSuite) || promptReady : promptReady;
+  const canRun =
+    !disabled && promptSourceReady && !busy && (mode === "baseline" || targetReady);
+  const runLabel = busy
+    ? mode === "sweep"
+      ? "Running sweep…"
+      : mode === "batch"
+        ? "Batch running…"
+        : "Generating…"
+    : MODES[mode].runLabel;
   const statusText = disabled
-    ? "Load the model to enable generation."
-    : !promptReady
-      ? "Enter a prompt to run."
-      : mode !== "baseline" && !targetReady
-        ? "Set a steering target to run this mode."
-        : busy
-          ? mode === "sweep"
-            ? "Sweeping sequentially. Larger sweeps can take several minutes."
-            : "Generation in progress."
-          : "Ready.";
+    ? "Load the model first and generation switches on."
+    : mode === "batch" && !promptSourceReady
+      ? "Write a prompt, or pick a suite to run the matrix across."
+      : !promptSourceReady
+        ? "Write a prompt to run."
+        : mode !== "baseline" && !targetReady
+          ? "Choose a steering target for this mode."
+          : busy
+            ? mode === "sweep"
+              ? "Working through the sweep one run at a time. A big one can take a few minutes."
+              : mode === "batch"
+                ? "Running the matrix one generation at a time."
+                : "The model is writing."
+            : "Ready when you are.";
 
   return (
     <section className="panel generation">
       <header className="panel-header">
         <div>
           <h2>Steering and generation</h2>
-          <p className="subtle">Pick a mode, confirm the target, then run one explicit experiment.</p>
+          <p className="subtle">Choose a mode, check the target, then run one experiment at a time.</p>
         </div>
       </header>
 
@@ -274,10 +471,10 @@ export function GenerationPanel({
           </div>
           <p className="subtle">
             {mode === "baseline"
-              ? "Baseline runs ignore the steering target."
+              ? "Baseline runs do not use the target at all."
               : targetReady
-                ? "Steered and sweep runs shift this module's output while you inspect any module you like."
-                : "Select a steerable module in the inspector, then set it as the target. Inspecting another module will not change it."}
+                ? "Steered, sweep, and batch runs nudge this module's output while you inspect whatever you like."
+                : "Pick a steerable module in the inspector and set it as the target. Browsing other modules will not move it."}
           </p>
           {selectedSteerableId && selectedSteerableId !== steeringTargetId && (
             <button
@@ -287,6 +484,18 @@ export function GenerationPanel({
             >
               Use inspected module
             </button>
+          )}
+          {direction && (
+            <div className="direction-row">
+              <span className="badge steerable-badge">direction · {direction.components.length} dims</span>
+              <span className="subtle">
+                from two runs · separation {direction.separation.toFixed(2)} · {direction.positions_compared}{" "}
+                positions
+              </span>
+              <button type="button" className="secondary small" onClick={clearDirection}>
+                Clear direction
+              </button>
+            </div>
           )}
         </fieldset>
 
@@ -362,13 +571,39 @@ export function GenerationPanel({
           </label>
         </fieldset>
 
-        {mode === "steered" && (
+        {mode !== "baseline" && (
           <fieldset className="control-card steering-card">
-            <legend>Steering settings</legend>
+            <legend>Steering</legend>
             <p className="subtle">
-              Shift one hidden dimension by α at every token. α=0 must reproduce the baseline exactly.
+              Shift hidden dimensions by α at every token. α=0 must reproduce the baseline exactly.
+              In σ mode, α is measured in units of each dimension&apos;s standard deviation, so the same
+              α means the same displacement across layers.
             </p>
             <div className="form-grid">
+              <label>
+                <span>Normalization</span>
+                <select
+                  value={normalization}
+                  onChange={(event) =>
+                    setNormalization(event.target.value as SteeringNormalization)
+                  }
+                >
+                  <option value="raw">raw activation units</option>
+                  <option value="sigma">σ units (per dimension)</option>
+                </select>
+              </label>
+              <label>
+                <span>Strength α</span>
+                <input
+                  type="number"
+                  step={0.5}
+                  value={strength}
+                  onChange={(event) => setStrength(Number(event.target.value))}
+                />
+              </label>
+            </div>
+
+            {!multiDim ? (
               <label>
                 <span>Hidden dimension (0–{featureMax})</span>
                 <input
@@ -379,69 +614,131 @@ export function GenerationPanel({
                   onChange={(event) => setFeatureIndex(Number(event.target.value))}
                 />
               </label>
-              <label>
-                <span>Strength α</span>
-                <input
-                  type="number"
-                  min={-STRENGTH_LIMIT}
-                  max={STRENGTH_LIMIT}
-                  step={0.5}
-                  value={strength}
-                  onChange={(event) => setStrength(Number(event.target.value))}
-                />
-              </label>
-            </div>
-            <label className="strength-slider">
-              <span>Strength slider: {strength}</span>
-              <input
-                type="range"
-                min={-STRENGTH_LIMIT}
-                max={STRENGTH_LIMIT}
-                step={0.5}
-                value={clampedStrength}
-                onChange={(event) => setStrength(Number(event.target.value))}
-              />
-            </label>
-            {featureClamped && (
-              <p className="field-note">Hidden dimension clamped to {clampedFeature}.</p>
+            ) : (
+              <div className="component-list" aria-label="Steering direction components">
+                {components.map((component) => (
+                  <button
+                    key={component.feature_index}
+                    type="button"
+                    className="component-chip"
+                    aria-label={`Remove dimension ${component.feature_index}`}
+                    onClick={() => removeComponent(component.feature_index)}
+                  >
+                    <span>
+                      #{component.feature_index} ×{component.weight}
+                    </span>
+                    <span aria-hidden="true">✕</span>
+                  </button>
+                ))}
+              </div>
             )}
-            {strengthClamped && <p className="field-note">Strength clamped to {clampedStrength}.</p>}
-            <button type="button" className="secondary" onClick={() => setStrength(0)} disabled={strength === 0}>
-              Reset strength to 0
-            </button>
-          </fieldset>
-        )}
 
-        {mode === "sweep" && (
-          <fieldset className="control-card steering-card">
-            <legend>Sweep settings</legend>
-            <p className="subtle">
-              Each strength and optional random control is compared against one shared baseline.
-            </p>
-            <div className="form-grid">
+            <div className="dimension-add">
+              {!multiDim && (
+                <p className="subtle dimension-add-hint">
+                  Combine dimensions: add them with weights to steer a whole direction instead of a
+                  single slot.
+                </p>
+              )}
               <label>
-                <span>Hidden dimension (0–{featureMax})</span>
+                <span>New dimension (0–{featureMax})</span>
                 <input
                   type="number"
                   min={0}
                   max={featureMax}
-                  value={sweepFeatureIndex}
-                  onChange={(event) => setSweepFeatureIndex(Number(event.target.value))}
+                  value={newDimension}
+                  onChange={(event) => setNewDimension(Number(event.target.value))}
                 />
               </label>
               <label>
-                <span>Repeats (1–3)</span>
+                <span>Weight</span>
+                <input
+                  type="number"
+                  step={0.1}
+                  value={newWeight}
+                  onChange={(event) => setNewWeight(Number(event.target.value))}
+                />
+              </label>
+              <button type="button" className="secondary small" onClick={addComponent}>
+                Add dimension
+              </button>
+            </div>
+
+            <label className="strength-slider">
+              <span>Strength slider: {strength}</span>
+              <input
+                type="range"
+                min={normalization === "raw" ? -SLIDER_LIMIT : -SIGMA_SLIDER_LIMIT}
+                max={normalization === "raw" ? SLIDER_LIMIT : SIGMA_SLIDER_LIMIT}
+                step={normalization === "raw" ? 0.5 : 0.1}
+                value={Math.max(
+                  normalization === "raw" ? -SLIDER_LIMIT : -SIGMA_SLIDER_LIMIT,
+                  Math.min(
+                    normalization === "raw" ? SLIDER_LIMIT : SIGMA_SLIDER_LIMIT,
+                    Number.isFinite(strength) ? strength : 0,
+                  ),
+                )}
+                onChange={(event) => setStrength(Number(event.target.value))}
+              />
+            </label>
+            {featureClamped && !multiDim && (
+              <p className="field-note">Hidden dimension clamped to {clampedFeature}.</p>
+            )}
+            {strengthClamped && (
+              <p className="field-note">
+                Strength clamped to {clampedStrength} (server limit ±{strengthLimit}).
+              </p>
+            )}
+            <div className="button-row">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setStrength(0)}
+                disabled={strength === 0}
+              >
+                Reset strength to 0
+              </button>
+              {multiDim && !direction && (
+                <button type="button" className="secondary" onClick={clearDirection}>
+                  Remove all dimensions
+                </button>
+              )}
+            </div>
+          </fieldset>
+        )}
+
+        {mode === "sweep" && (
+          <fieldset className="control-card">
+            <legend>Sweep settings</legend>
+            <p className="subtle">
+              Every strength, and the optional random control, is measured against the same baseline.
+            </p>
+            <div className="form-grid">
+              {!multiDim && (
+                <label>
+                  <span>Hidden dimension (0–{featureMax})</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={featureMax}
+                    value={sweepFeatureIndex}
+                    onChange={(event) => setSweepFeatureIndex(Number(event.target.value))}
+                  />
+                </label>
+              )}
+              <label>
+                <span>Repeats (1–10)</span>
                 <input
                   type="number"
                   min={1}
-                  max={3}
+                  max={10}
                   value={repeats}
                   onChange={(event) => setRepeats(Number(event.target.value))}
                 />
               </label>
             </div>
             <label>
-              <span>Strengths α (comma-separated, 1–9 values)</span>
+              <span>Strengths α (comma-separated, 1–32 values)</span>
               <input
                 type="text"
                 value={strengthsText}
@@ -449,7 +746,7 @@ export function GenerationPanel({
                 onChange={(event) => setStrengthsText(event.target.value)}
               />
             </label>
-            {sweepFeatureClamped && (
+            {sweepFeatureClamped && !multiDim && (
               <p className="field-note">Hidden dimension clamped to {clampedSweepFeature}.</p>
             )}
             <label className="checkbox">
@@ -471,7 +768,105 @@ export function GenerationPanel({
                 />
               </label>
             )}
-            <p className="subtle">Sweeps run sequentially; larger sweeps can take several minutes.</p>
+            <p className="subtle">Runs happen one after another, so a long sweep can take a few minutes.</p>
+          </fieldset>
+        )}
+
+        {mode === "batch" && (
+          <fieldset className="control-card steering-card">
+            <legend>Batch plan</legend>
+            <div className="form-grid">
+              <label>
+                <span>Prompt source</span>
+                <select value={suiteId} onChange={(event) => setSuiteId(event.target.value)}>
+                  <option value="">Current prompt only</option>
+                  {suites.map((suite) => (
+                    <option key={suite.id} value={suite.id}>
+                      {suite.name} ({suite.prompts.length})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Module preset</span>
+                <select value={presetId} onChange={(event) => setPresetId(event.target.value)}>
+                  {modulePresets.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.label} ({preset.modules.length})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {selectedSuite && <p className="subtle">{selectedSuite.description}</p>}
+            <div className="form-grid">
+              <label>
+                <span>Strengths α (comma-separated)</span>
+                <input
+                  type="text"
+                  value={batchStrengthsText}
+                  onChange={(event) => setBatchStrengthsText(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Repeats (1–10)</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={batchRepeats}
+                  onChange={(event) => setBatchRepeats(Number(event.target.value))}
+                />
+              </label>
+              <label>
+                <span>Layers from</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={layerFrom}
+                  onChange={(event) => setLayerFrom(Number(event.target.value))}
+                />
+              </label>
+              <label>
+                <span>Layers to</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={layerTo}
+                  onChange={(event) => setLayerTo(Number(event.target.value))}
+                />
+              </label>
+            </div>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={batchControl}
+                onChange={(event) => setBatchControl(event.target.checked)}
+              />
+              <span>Include random-feature control</span>
+            </label>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={batchBaseline}
+                onChange={(event) => setBatchBaseline(event.target.checked)}
+              />
+              <span>Baseline per prompt</span>
+            </label>
+            <p className="subtle">
+              {batchPlan.error
+                ? batchPlan.error
+                : `${batchModules.length} module(s) × ${batchPlan.strengths.length} strength(s) × ${
+                    batchPlan.promptCount
+                  } prompt(s) × ${Math.max(1, Math.round(batchRepeats))} repeat(s)${
+                    batchControl ? " + control" : ""
+                  }${batchBaseline ? ` + ${batchPlan.promptCount} baseline` : ""} = ${
+                    batchPlan.total
+                  } generations.`}
+            </p>
+            <p className="subtle">
+              A batch runs in the background: you can cancel it, and completed runs are saved as you go.
+            </p>
           </fieldset>
         )}
 
@@ -520,14 +915,30 @@ export function GenerationPanel({
             {sweepLocalError ?? sweepError}
           </div>
         )}
+        {batchLocalError && (
+          <div className="error-banner" role="alert">
+            {batchLocalError}
+          </div>
+        )}
+        {batchError && (
+          <div className="error-banner" role="alert">
+            {batchError}
+          </div>
+        )}
       </div>
 
       <div className="results" aria-live="polite">
+        {batchJob && <BatchProgress job={batchJob} onCancel={onCancelBatch} />}
+
         {pair && (
           <div className="comparison">
             <h4>
-              Baseline vs steered · hook: {pair.steered.steering?.module_id} · dim{" "}
-              {pair.steered.steering?.feature_index} · α {pair.steered.steering?.strength}
+              Baseline vs steered · hook: {pair.steered.steering?.module_id} ·{" "}
+              {pair.steered.steering?.components?.length
+                ? `${pair.steered.steering.components.length} dims`
+                : `dim ${pair.steered.steering?.feature_index}`}{" "}
+              · α {pair.steered.steering?.strength}
+              {pair.steered.steering?.normalization === "sigma" ? " (σ)" : ""}
             </h4>
             <div className="comparison-columns">
               {(["baseline", "steered"] as const).map((condition) => {
@@ -546,7 +957,8 @@ export function GenerationPanel({
                         {warning}
                       </div>
                     ))}
-                    <pre className="output">{run.output || "(empty output)"}</pre>
+                    <pre className="output">{run.output || "(no text generated)"}</pre>
+                    <MetricsLine run={run} />
                     <p className="subtle">
                       run {run.id.slice(0, 8)} · prompt tokens: {run.prompt_tokens}
                     </p>
@@ -557,7 +969,7 @@ export function GenerationPanel({
           </div>
         )}
 
-        {!pair && result && (
+        {!pair && !batchJob && result && (
           <div className="result">
             <div className="result-meta">
               <span>{result.generated_tokens} tokens</span>
@@ -570,14 +982,15 @@ export function GenerationPanel({
                 {warning}
               </div>
             ))}
-            <pre className="output">{result.output || "(empty output)"}</pre>
+            <pre className="output">{result.output || "(no text generated)"}</pre>
+            <MetricsLine run={result} />
             <p className="subtle">
               prompt tokens: {result.prompt_tokens} · run {result.id.slice(0, 8)} · {result.model_id}
             </p>
           </div>
         )}
 
-        {sweepResult && (
+        {!batchJob && sweepResult && (
           <div className="sweep-results">
             <h4>
               Sweep {sweepResult.sweep_id.slice(0, 8)} · {sweepResult.runs.length} run
@@ -596,6 +1009,7 @@ export function GenerationPanel({
                   <th>Strength</th>
                   <th>Duration</th>
                   <th>Tok/s</th>
+                  <th>Checks</th>
                   <th>Output</th>
                 </tr>
               </thead>
@@ -612,6 +1026,11 @@ export function GenerationPanel({
                     <td>{run.run.duration_ms.toFixed(0)} ms</td>
                     <td>{run.run.tokens_per_second?.toFixed(1) ?? "—"}</td>
                     <td>
+                      {run.run.metrics?.checks_total
+                        ? `${run.run.metrics.checks_passed}/${run.run.metrics.checks_total}`
+                        : "—"}
+                    </td>
+                    <td>
                       <SweepOutputCell run={run.run} />
                     </td>
                   </tr>
@@ -625,6 +1044,107 @@ export function GenerationPanel({
   );
 }
 
+function MetricsLine({ run }: { run: BaselineResponse }) {
+  const metrics = run.metrics;
+  if (!metrics) return null;
+  const markers = Object.entries(metrics.lexicon)
+    .filter(([, value]) => value > 0)
+    .map(([name, value]) => `${name} ${value.toFixed(1)}`)
+    .join(" · ");
+  return (
+    <p className="subtle metrics-line">
+      {metrics.words} words · distinct-3 {metrics.distinct_3.toFixed(2)} · repetition{" "}
+      {metrics.repeated_4gram_ratio.toFixed(2)}
+      {metrics.checks_total ? ` · checks ${metrics.checks_passed}/${metrics.checks_total}` : ""}
+      {markers ? ` · ${markers}` : ""}
+      {metrics.refusal ? " · refusal" : ""}
+    </p>
+  );
+}
+
+function BatchProgress({ job, onCancel }: { job: BatchJob; onCancel?: () => void }) {
+  const percent = job.total > 0 ? Math.round((job.completed / job.total) * 100) : 0;
+  const running = job.state === "queued" || job.state === "running";
+  const lexiconKeys = Array.from(
+    new Set(job.cells.flatMap((cell) => Object.keys(cell.lexicon_mean))),
+  ).sort();
+  return (
+    <div className="batch-progress">
+      <div className="batch-head">
+        <h4>
+          Batch {job.job_id.slice(0, 8)}
+          <span className={`badge condition-${job.state === "completed" ? "baseline" : "control"}`}>
+            {job.state}
+          </span>
+        </h4>
+        {running && onCancel && (
+          <button type="button" className="secondary small" onClick={onCancel}>
+            Cancel batch
+          </button>
+        )}
+      </div>
+      <p className="subtle">{job.plan}</p>
+      <progress
+        className="batch-bar"
+        max={Math.max(1, job.total)}
+        value={job.completed}
+        aria-label={`Batch progress: ${job.completed} of ${job.total} runs`}
+      />
+      <p className="subtle">
+        {job.completed}/{job.total} runs ({percent}%){job.current ? ` · ${job.current}` : ""}
+        {job.error ? ` · ${job.error}` : ""}
+      </p>
+      {job.warnings.map((warning) => (
+        <div key={warning} className="warning-banner inline">
+          {warning}
+        </div>
+      ))}
+      {job.cells.length > 0 && (
+        <table className="data-table sweep-table batch-table">
+          <thead>
+            <tr>
+              <th>Kind</th>
+              <th>Module</th>
+              <th>α</th>
+              <th>Runs</th>
+              <th>Words</th>
+              <th>Distinct-3</th>
+              <th>Checks</th>
+              <th>Refusals</th>
+              {lexiconKeys.map((key) => (
+                <th key={key}>{key}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {job.cells.map((cell) => (
+              <tr key={`${cell.kind}-${cell.module_id}-${cell.strength}`}>
+                <td>
+                  <span className={`badge condition-${cell.kind}`}>{cell.kind}</span>
+                </td>
+                <td>{cell.module_id ?? "—"}</td>
+                <td>{cell.strength ?? "—"}</td>
+                <td>{cell.runs}</td>
+                <td>{cell.words_mean.toFixed(1)}</td>
+                <td>{cell.distinct_3_mean.toFixed(2)}</td>
+                <td>
+                  {cell.checks_passed_rate === null
+                    ? "—"
+                    : `${Math.round(cell.checks_passed_rate * 100)}%`}
+                </td>
+                <td>{Math.round(cell.refusal_rate * 100)}%</td>
+                {lexiconKeys.map((key) => (
+                  <td key={key}>{(cell.lexicon_mean[key] ?? 0).toFixed(1)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 function SweepOutputCell({ run }: { run: BaselineResponse }) {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -632,7 +1152,7 @@ function SweepOutputCell({ run }: { run: BaselineResponse }) {
       <button className="secondary small" onClick={() => setExpanded((value) => !value)}>
         {expanded ? "Collapse" : "Show output"}
       </button>
-      {expanded && <pre className="output small">{run.output || "(empty output)"}</pre>}
+      {expanded && <pre className="output small">{run.output || "(no text generated)"}</pre>}
     </div>
   );
 }

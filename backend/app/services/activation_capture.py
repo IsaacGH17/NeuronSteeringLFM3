@@ -15,7 +15,7 @@ import torch
 
 from backend.app.services.architecture_inspector import STEERABLE_CLASSES, get_module
 
-MAX_CAPTURE_MODULES = 8
+MAX_CAPTURE_MODULES = 128
 MAX_CAPTURE_POSITIONS = 2048
 
 

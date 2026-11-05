@@ -3,12 +3,23 @@ import type {
   ActivationSummary,
   Architecture,
   BaselineResponse,
+  BatchJob,
+  BatchRequest,
   Diagnostics,
+  DirectionRequest,
+  DirectionResponse,
   ExperimentDetail,
   ExperimentListResponse,
+  FlowRequest,
+  FlowResponse,
   GenerationSettings,
+  LensRequest,
+  LensResponse,
   ModelStatus,
   ModuleDetail,
+  PatchRequest,
+  PatchResponse,
+  PromptSuite,
   SteeringResponse,
   SteeringSpec,
   SweepResponse,
@@ -116,7 +127,9 @@ export interface SweepPayload {
   system: string | null;
   settings: GenerationSettings;
   module_id: string;
-  feature_index: number;
+  feature_index: number | null;
+  components?: { feature_index: number; weight: number }[];
+  normalization?: "raw" | "sigma";
   strengths: number[];
   include_control: boolean;
   control_seed: number | null;
@@ -127,6 +140,13 @@ export interface SweepPayload {
 
 export function runSweep(payload: SweepPayload): Promise<SweepResponse> {
   return request<SweepResponse>("/experiments/sweep", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function runFlow(payload: FlowRequest): Promise<FlowResponse> {
+  return request<FlowResponse>("/experiments/flow", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -201,4 +221,49 @@ export function getActivation(
   if (query.compareWith) params.set("compare_with", query.compareWith);
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
   return request<ActivationResponse>(`/experiments/${experimentId}/activations/${moduleId}${suffix}`);
+}
+
+export interface SuiteListResponse {
+  suites: PromptSuite[];
+}
+
+export function listSuites(): Promise<SuiteListResponse> {
+  return request<SuiteListResponse>("/suites");
+}
+
+export function computeDirection(payload: DirectionRequest): Promise<DirectionResponse> {
+  return request<DirectionResponse>("/experiments/direction", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function startBatch(payload: BatchRequest): Promise<BatchJob> {
+  return request<BatchJob>("/experiments/batch", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getBatchJob(jobId: string, includeRuns = false): Promise<BatchJob> {
+  const suffix = includeRuns ? "?include_runs=true" : "";
+  return request<BatchJob>(`/experiments/batch/${jobId}${suffix}`);
+}
+
+export function cancelBatchJob(jobId: string): Promise<BatchJob> {
+  return request<BatchJob>(`/experiments/batch/${jobId}/cancel`, { method: "POST" });
+}
+
+export function runLens(payload: LensRequest): Promise<LensResponse> {
+  return request<LensResponse>("/experiments/lens", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function runPatch(payload: PatchRequest): Promise<PatchResponse> {
+  return request<PatchResponse>("/experiments/patch", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }

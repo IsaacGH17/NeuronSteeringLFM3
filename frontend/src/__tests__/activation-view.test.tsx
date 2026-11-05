@@ -9,13 +9,13 @@ const noop = () => undefined;
 describe("ActivationView", () => {
   it("prompts for a captured run when no tensor is available", () => {
     render(<ActivationView activation={null} loading={false} error={null} onQuery={noop} />);
-    expect(screen.getByText("No activations captured yet")).toBeInTheDocument();
+    expect(screen.getByText("Nothing captured yet")).toBeInTheDocument();
   });
 
   it("renders capture errors instead of stale tensors", () => {
     render(<ActivationView activation={null} loading={false} error="No capture for module" onQuery={noop} />);
     expect(screen.getByText("No capture for module")).toBeInTheDocument();
-    expect(screen.queryByText("No activations captured yet")).not.toBeInTheDocument();
+    expect(screen.queryByText("Nothing captured yet")).not.toBeInTheDocument();
   });
 
   it("renders the real tensor shape, tokens, stats, and top dimensions", () => {
@@ -77,5 +77,23 @@ describe("ActivationView", () => {
     );
     expect(screen.getByText("steered − baseline")).toBeInTheDocument();
     expect(screen.getByText("Truncated to shared positions")).toBeInTheDocument();
+  });
+
+  it("shows the per-dimension sigma for the selected feature", () => {
+    const stats = {
+      mean: Array(8).fill(0),
+      std: Array.from({ length: 8 }, (_, index) => (index === 7 ? 0.25 : 0.1)),
+      minimum: Array(8).fill(0),
+      maximum: Array(8).fill(0),
+    };
+    render(
+      <ActivationView
+        activation={activationFixture({ feature_stats: stats })}
+        loading={false}
+        error={null}
+        onQuery={noop}
+      />,
+    );
+    expect(screen.getByText(/σ\(dim 7\) = 0\.2500/)).toBeInTheDocument();
   });
 });

@@ -173,7 +173,7 @@ def test_steering_api_rejects_invalid_specs(client):
     for spec, status in [
         ({"module_id": "model.no", "feature_index": 0, "strength": 1.0}, 400),
         ({"module_id": "model.layers.0", "feature_index": 999, "strength": 1.0}, 400),
-        ({"module_id": "model.layers.0", "feature_index": 0, "strength": 500.0}, 400),
+        ({"module_id": "model.layers.0", "feature_index": 0, "strength": 2000.0}, 400),
     ]:
         payload = {
             "prompt": "Hello",

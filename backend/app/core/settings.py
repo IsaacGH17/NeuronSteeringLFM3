@@ -44,7 +44,14 @@ class Settings:
     port: int = field(default_factory=lambda: _env_int("LFM3_PORT", 8000))
     max_new_tokens: int = field(default_factory=lambda: _env_int("LFM3_MAX_NEW_TOKENS", 256))
     max_steering_strength: float = field(
-        default_factory=lambda: float(os.environ.get("LFM3_MAX_STEERING_STRENGTH", "50") or 50)
+        default_factory=lambda: float(os.environ.get("LFM3_MAX_STEERING_STRENGTH", "1000") or 1000)
+    )
+    max_batch_runs: int = field(default_factory=lambda: _env_int("LFM3_MAX_BATCH_RUNS", 2000))
+    activation_store_experiments: int = field(
+        default_factory=lambda: _env_int("LFM3_ACTIVATION_STORE_EXPERIMENTS", 32)
+    )
+    activation_store_bytes: int = field(
+        default_factory=lambda: _env_int("LFM3_ACTIVATION_STORE_BYTES", 512 * 1024 * 1024)
     )
     allow_cpu_fallback: bool = field(default_factory=lambda: _env_bool("LFM3_ALLOW_CPU_FALLBACK", True))
     data_dir: Path = field(default_factory=lambda: _env_path("LFM3_DATA_DIR", PROJECT_ROOT / "data"))

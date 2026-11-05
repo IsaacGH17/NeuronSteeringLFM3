@@ -83,26 +83,38 @@ def run_sweep(
     """Run baseline + strengths (+ optional control) across repeats."""
     if not payload.strengths:
         raise ValueError("sweep strengths must contain at least one value.")
-    if not (1 <= len(payload.strengths) <= 9):
-        raise ValueError("sweep strengths must contain between 1 and 9 values.")
-    if not (1 <= payload.repeats <= 3):
-        raise ValueError("repeats must be between 1 and 3.")
+    if not (1 <= len(payload.strengths) <= 32):
+        raise ValueError("sweep strengths must contain between 1 and 32 values.")
+    if not (1 <= payload.repeats <= 10):
+        raise ValueError("repeats must be between 1 and 10.")
     for strength in payload.strengths:
         if not math.isfinite(strength):
             raise ValueError("strengths must be finite.")
 
-    # Validate the target module/feature and every strength up front.
+    components = tuple((component.feature_index, float(component.weight)) for component in payload.components)
+    if not components:
+        if payload.feature_index is None:
+            raise ValueError("sweep needs feature_index or components.")
+        components = ((payload.feature_index, 1.0),)
+
+    # Validate the target module/direction and every strength up front.
     for strength in payload.strengths:
         validate_steering_spec(
             manager.model,
-            EngineSteeringSpec(payload.module_id, payload.feature_index, strength),
+            EngineSteeringSpec(
+                module_id=payload.module_id,
+                feature_index=payload.feature_index,
+                strength=strength,
+                components=components,
+                normalization=payload.normalization,
+            ),
             strength_limit=manager.settings.max_steering_strength,
         )
 
     total = 1 + payload.repeats * (len(payload.strengths) + (1 if payload.include_control else 0))
-    if total > 31:
+    if total > manager.settings.max_batch_runs:
         raise ValueError(
-            f"Sweep would create {total} runs; the limit is 31 "
+            f"Sweep would create {total} runs; the limit is {manager.settings.max_batch_runs} "
             f"(1 + repeats * (len(strengths) + (1 if include_control else 0)))."
         )
 
@@ -144,9 +156,11 @@ def run_sweep(
         else:
             control_seed = secrets.randbelow(2**31)
         rng = random.Random(control_seed)
-        control_feature = rng.randrange(0, hidden_size)
-        if control_feature == payload.feature_index:
-            control_feature = (control_feature + 1) % hidden_size
+        target_indices = {index for index, _ in components}
+        candidates = [index for index in range(hidden_size) if index not in target_indices]
+        if not candidates:
+            raise ValueError("A random-feature control needs at least one unsteered dimension.")
+        control_feature = candidates[rng.randrange(len(candidates))]
         max_magnitude = max(abs(s) for s in payload.strengths)
         sign = math.copysign(1.0, payload.strengths[-1])
         control_strength = sign * max_magnitude
@@ -170,6 +184,8 @@ def run_sweep(
                 module_id=payload.module_id,
                 feature_index=payload.feature_index,
                 strength=strength,
+                components=[{"feature_index": index, "weight": weight} for index, weight in components],
+                normalization=payload.normalization,
             )
             result = generate_steered(
                 manager,
@@ -192,6 +208,7 @@ def run_sweep(
                 module_id=payload.module_id,
                 feature_index=control_feature,
                 strength=control_strength,
+                normalization=payload.normalization,
             )
             control_result = generate_chat(
                 manager,

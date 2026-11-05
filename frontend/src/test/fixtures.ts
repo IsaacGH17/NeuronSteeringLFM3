@@ -5,6 +5,7 @@ import type {
   Diagnostics,
   ExperimentDetail,
   ExperimentSummary,
+  FlowResponse,
   GenerationSettings,
   ModuleDetail,
   ModuleNode,
@@ -158,6 +159,7 @@ export function baselineFixture(overrides: Partial<BaselineResponse> = {}): Base
     settings: DEFAULT_SETTINGS,
     steering: null,
     captured_modules: [],
+    metrics: null,
     warnings: [],
     ...overrides,
   };
@@ -200,6 +202,7 @@ export function activationFixture(overrides: Partial<ActivationResponse> = {}): 
       positions: [0, 1, 2],
       values: [0.1, 0.4, 1.5],
     },
+    feature_stats: null,
     comparison: null,
     warnings: [],
     ...overrides,
@@ -222,6 +225,8 @@ export function summaryFixture(overrides: Partial<ExperimentSummary> = {}): Expe
     module_id: null,
     feature_index: null,
     strength: null,
+    steering_summary: null,
+    metrics: null,
     prompt_preview: "Hello",
     output_preview: "A transformer activation is a hidden-state vector.",
     has_activations: false,
@@ -294,3 +299,82 @@ export const diagnosticsFixture: Diagnostics = {
   memory: null,
   notes: [],
 };
+
+function flowClusters(layerIndex: number) {
+  const base = layerIndex * 10;
+  return [
+    {
+      id: 0,
+      size: 3,
+      mass: 0.6,
+      cohesion: 0.8,
+      peak_position: 2,
+      direction_norm: 1.4,
+      top_dimensions: [
+        { index: base, weight: 1, mean_abs: 0.5, sigma: 0.12 },
+        { index: base + 5, weight: 0.5, mean_abs: 0.4, sigma: 0.09 },
+      ],
+      profile: [0.1, 0.2, 0.3, 0.2],
+      profile_positions: [0, 1, 2, 3],
+      components: [
+        { feature_index: base, weight: 1 },
+        { feature_index: base + 5, weight: 0.5 },
+      ],
+    },
+    {
+      id: 1,
+      size: 2,
+      mass: 0.4,
+      cohesion: 0.7,
+      peak_position: 3,
+      direction_norm: 1.1,
+      top_dimensions: [
+        { index: base + 9, weight: -0.8, mean_abs: 0.3, sigma: 0.05 },
+      ],
+      profile: [-0.1, -0.2, -0.1, -0.3],
+      profile_positions: [0, 1, 2, 3],
+      components: [{ feature_index: base + 9, weight: -0.8 }],
+    },
+  ];
+}
+
+export function flowFixture(overrides: Partial<FlowResponse> = {}): FlowResponse {
+  return {
+    experiment_id: "d".repeat(32),
+    prompt: "Explain activations.",
+    system: null,
+    output: "An activation is a hidden-state vector.",
+    prompt_tokens: 3,
+    generated_tokens: 1,
+    tokens: [
+      { index: 0, token_id: 10, text: "The", phase: "prompt" },
+      { index: 1, token_id: 11, text: " sky", phase: "prompt" },
+      { index: 2, token_id: 12, text: " is", phase: "prompt" },
+      { index: 3, token_id: 13, text: " blue", phase: "generated" },
+    ],
+    layers: [0, 1, 2].map((layerIndex) => ({
+      layer_index: layerIndex,
+      module_id: `model.layers.${layerIndex}`,
+      layer_type: layerIndex === 0 ? "conv" : "full_attention",
+      operator_type: layerIndex === 0 ? ("conv" as const) : ("attention" as const),
+      mean_norm: 2.5 + layerIndex,
+      delta_norm: 0.8 + layerIndex * 0.2,
+      write: layerIndex === 0 ? 0 : 0.42 + layerIndex * 0.1,
+      similarity: layerIndex === 0 ? 1 : 0.9 - layerIndex * 0.03,
+      gain: layerIndex === 0 ? 1 : 1.1 + layerIndex * 0.05,
+      energy: [1, 2, 3, 4].map((value) => value + layerIndex),
+      delta: [0.5, 1, 1.5, 2].map((value) => value + layerIndex * 0.2),
+      clusters: flowClusters(layerIndex),
+    })),
+    edges: [
+      { source_layer: 0, target_layer: 1, write: 0.42, similarity: 0.9, gain: 1.1 },
+      { source_layer: 1, target_layer: 2, write: 0.52, similarity: 0.87, gain: 1.15 },
+    ],
+    global_max_norm: 6,
+    cluster_k: 2,
+    cluster_positions: 4,
+    settings: DEFAULT_SETTINGS,
+    warnings: [],
+    ...overrides,
+  };
+}

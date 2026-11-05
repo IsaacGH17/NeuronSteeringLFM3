@@ -32,6 +32,7 @@ from backend.app.schemas.api import (
     ExperimentSummary,
     GenerationSettings,
     SteeringSpec,
+    TextMetrics,
     TokenInfo,
 )
 from backend.app.services.activation_store import ActivationStore, StoredExperiment
@@ -136,6 +137,7 @@ class ExperimentRecord:
     repeat_index: int | None = None
     activation_snapshot_path: str | None = None
     activation_snapshot_size: int | None = None
+    metrics: TextMetrics | None = None
 
 
 class ExperimentStore:
@@ -222,6 +224,7 @@ class ExperimentStore:
             "repeat_index": record.repeat_index,
             "activation_snapshot_path": record.activation_snapshot_path,
             "activation_snapshot_size": record.activation_snapshot_size,
+            "metrics": record.metrics.model_dump(mode="json") if record.metrics else None,
         }
 
     def _record_from_dict(self, data: dict[str, Any]) -> ExperimentRecord:
@@ -254,6 +257,7 @@ class ExperimentStore:
             repeat_index=data.get("repeat_index"),
             activation_snapshot_path=data.get("activation_snapshot_path"),
             activation_snapshot_size=data.get("activation_snapshot_size"),
+            metrics=TextMetrics(**data["metrics"]) if data.get("metrics") else None,
         )
 
     def _append_jsonl(self, record: ExperimentRecord) -> None:
@@ -350,6 +354,7 @@ class ExperimentStore:
             repeat_index=repeat_index,
             activation_snapshot_path=snapshot_path,
             activation_snapshot_size=snapshot_size,
+            metrics=response.metrics,
         )
 
         with self._lock:
@@ -409,6 +414,8 @@ class ExperimentStore:
             module_id=record.steering.module_id if record.steering else None,
             feature_index=record.steering.feature_index if record.steering else None,
             strength=record.steering.strength if record.steering else None,
+            steering_summary=record.steering.describe() if record.steering else None,
+            metrics=record.metrics,
             prompt_preview=_preview(record.prompt),
             output_preview=_preview(record.output),
             has_activations=has_activations,
@@ -563,6 +570,13 @@ class ExperimentStore:
                 "module_id",
                 "feature_index",
                 "strength",
+                "dimensions",
+                "normalization",
+                "words",
+                "distinct_3",
+                "refusal",
+                "checks_passed",
+                "checks_total",
                 "prompt",
                 "output",
                 "prompt_tokens",
@@ -596,6 +610,13 @@ class ExperimentStore:
                     _safe_text(record.steering.module_id if record.steering else None),
                     _raw(record.steering.feature_index if record.steering else None),
                     _raw(record.steering.strength if record.steering else None),
+                    _raw(record.steering.dimension_count if record.steering else None),
+                    _safe_text(record.steering.normalization if record.steering else None),
+                    _raw(record.metrics.words if record.metrics else None),
+                    _raw(record.metrics.distinct_3 if record.metrics else None),
+                    _raw(record.metrics.refusal if record.metrics else None),
+                    _raw(record.metrics.checks_passed if record.metrics else None),
+                    _raw(record.metrics.checks_total if record.metrics else None),
                     _safe_text(record.prompt),
                     _safe_text(record.output),
                     _raw(record.prompt_tokens),
@@ -620,4 +641,8 @@ def make_experiment_store(settings=None) -> ExperimentStore:
     return ExperimentStore(
         data_dir=settings.data_dir,
         persist_activations_default=settings.persist_activations,
+        activation_store=ActivationStore(
+            max_experiments=settings.activation_store_experiments,
+            max_bytes=settings.activation_store_bytes,
+        ),
     )

@@ -99,10 +99,48 @@ export interface GenerationSettings {
   enable_thinking: boolean;
 }
 
+export interface SteeringComponent {
+  feature_index: number;
+  weight: number;
+}
+
+export type SteeringNormalization = "raw" | "sigma";
+
 export interface SteeringSpec {
   module_id: string;
-  feature_index: number;
   strength: number;
+  feature_index: number | null;
+  components?: SteeringComponent[];
+  normalization?: SteeringNormalization;
+}
+
+export interface FeatureStats {
+  mean: number[];
+  std: number[];
+  minimum: number[];
+  maximum: number[];
+}
+
+export interface MetricCheck {
+  name: string;
+  kind: string;
+  expected: string | number | null;
+  passed: boolean;
+  detail: string | null;
+}
+
+export interface TextMetrics {
+  words: number;
+  characters: number;
+  sentences: number;
+  avg_words_per_sentence: number;
+  distinct_3: number;
+  repeated_4gram_ratio: number;
+  refusal: boolean;
+  lexicon: Record<string, number>;
+  checks: MetricCheck[];
+  checks_passed: number | null;
+  checks_total: number | null;
 }
 
 export type ExperimentCondition = "baseline" | "steered" | "control";
@@ -125,6 +163,7 @@ export interface BaselineResponse {
   settings: GenerationSettings;
   steering: SteeringSpec | null;
   captured_modules: string[];
+  metrics: TextMetrics | null;
   warnings: string[];
 }
 
@@ -158,6 +197,8 @@ export interface ExperimentSummary {
   module_id: string | null;
   feature_index: number | null;
   strength: number | null;
+  steering_summary: string | null;
+  metrics: TextMetrics | null;
   prompt_preview: string;
   output_preview: string;
   has_activations: boolean;
@@ -266,6 +307,237 @@ export interface ActivationResponse {
   position: number;
   top_dimensions: TopDimension[];
   feature_series: FeatureSeries;
+  feature_stats: FeatureStats | null;
   comparison: string | null;
+  warnings: string[];
+}
+
+export interface SuiteCheck {
+  kind: string;
+  value: string | number | null;
+}
+
+export interface SuitePrompt {
+  id: string;
+  text: string;
+  tags: string[];
+  checks: SuiteCheck[];
+}
+
+export interface PromptSuite {
+  id: string;
+  name: string;
+  description: string;
+  kind: "trait" | "capability";
+  prompts: SuitePrompt[];
+}
+
+export interface ModulePreset {
+  id: string;
+  label: string;
+  modules: { module_id: string; layer_index: number }[];
+}
+
+export interface DirectionRequest {
+  positive_experiment_id: string;
+  negative_experiment_id: string;
+  module_id?: string | null;
+  position_mode?: "mean_prompt" | "mean_all" | "last_prompt";
+  top_k?: number;
+  normalize?: boolean;
+}
+
+export interface DirectionResponse {
+  module_id: string;
+  components: SteeringComponent[];
+  sigma: number[];
+  norm: number;
+  separation: number;
+  positions_compared: number;
+  warnings: string[];
+}
+
+export interface BatchPlan {
+  module_ids: string[];
+  components: SteeringComponent[];
+  normalization: SteeringNormalization;
+  strengths: number[];
+  include_control: boolean;
+  control_seed: number | null;
+  repeats: number;
+  baseline_per_prompt: boolean;
+}
+
+export interface BatchRequest {
+  suite_id: string | null;
+  prompts: string[];
+  system: string | null;
+  settings: GenerationSettings;
+  plan: BatchPlan;
+  capture_module_ids: string[];
+  persist_activations: boolean | null;
+}
+
+export type BatchState = "queued" | "running" | "completed" | "cancelled" | "failed";
+
+export interface BatchCellSummary {
+  kind: "baseline" | "steered" | "control";
+  module_id: string | null;
+  strength: number | null;
+  runs: number;
+  words_mean: number;
+  distinct_3_mean: number;
+  refusal_rate: number;
+  checks_passed_rate: number | null;
+  lexicon_mean: Record<string, number>;
+}
+
+export interface BatchRunRecord {
+  index: number;
+  kind: "baseline" | "steered" | "control";
+  sweep_index: number;
+  repeat_index: number;
+  prompt_id: string;
+  prompt: string;
+  run: BaselineResponse;
+}
+
+export interface BatchJob {
+  job_id: string;
+  state: BatchState;
+  total: number;
+  completed: number;
+  current: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+  plan: string;
+  warnings: string[];
+  runs: BatchRunRecord[];
+  cells: BatchCellSummary[];
+}
+
+export interface LensToken {
+  token_id: number;
+  text: string;
+  probability: number;
+}
+
+export interface LensLayer {
+  layer_index: number;
+  module_id: string;
+  top1_ids: number[];
+  top1_probs: number[];
+  top_tokens: LensToken[];
+  ablation_kl: number | null;
+  ablation_top1: LensToken | null;
+}
+
+export interface LensRequest {
+  prompt: string;
+  system?: string | null;
+  settings: GenerationSettings;
+  position?: number | null;
+  top_k?: number;
+}
+
+export interface LensResponse {
+  prompt: string;
+  system: string | null;
+  output: string;
+  prompt_tokens: number;
+  position: number;
+  tokens: TokenInfo[];
+  layers: LensLayer[];
+  vocab: Record<string, string>;
+  warnings: string[];
+}
+
+export interface PatchRequest {
+  recipient_prompt: string;
+  recipient_system?: string | null;
+  donor_prompt: string;
+  donor_system?: string | null;
+  module_id: string;
+  position?: number;
+  settings: GenerationSettings;
+}
+
+export interface PatchResponse {
+  module_id: string;
+  position: number;
+  donor_output: string;
+  baseline_output: string;
+  patched_output: string;
+  changed: boolean;
+  prompt_tokens: number;
+  warnings: string[];
+}
+
+export interface FlowDimension {
+  index: number;
+  weight: number;
+  mean_abs: number;
+  sigma: number;
+}
+
+export interface FlowCluster {
+  id: number;
+  size: number;
+  mass: number;
+  cohesion: number;
+  peak_position: number;
+  direction_norm: number;
+  top_dimensions: FlowDimension[];
+  profile: number[];
+  profile_positions: number[];
+  components: SteeringComponent[];
+}
+
+export interface FlowLayer {
+  layer_index: number;
+  module_id: string;
+  layer_type: string;
+  operator_type: "attention" | "conv";
+  mean_norm: number;
+  delta_norm: number;
+  write: number;
+  similarity: number;
+  gain: number;
+  energy: number[];
+  delta: number[];
+  clusters: FlowCluster[];
+}
+
+export interface FlowEdge {
+  source_layer: number;
+  target_layer: number;
+  write: number;
+  similarity: number;
+  gain: number;
+}
+
+export interface FlowRequest {
+  prompt: string;
+  system?: string | null;
+  settings: GenerationSettings;
+  cluster_k?: number;
+  cluster_max_positions?: number;
+}
+
+export interface FlowResponse {
+  experiment_id: string;
+  prompt: string;
+  system: string | null;
+  output: string;
+  prompt_tokens: number;
+  generated_tokens: number;
+  tokens: TokenInfo[];
+  layers: FlowLayer[];
+  edges: FlowEdge[];
+  global_max_norm: number;
+  cluster_k: number;
+  cluster_positions: number;
+  settings: GenerationSettings;
   warnings: string[];
 }

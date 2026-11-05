@@ -162,7 +162,7 @@ export function ArchitectureExplorer({ architecture, selectedId, onSelect, loadi
 
       {!architecture && (
         <div className="empty">
-          {loading ? "Loading architecture…" : "Load the model to discover its real module hierarchy."}
+          {loading ? "Loading architecture…" : "Load the model and its real module tree will appear here."}
         </div>
       )}
 
@@ -191,7 +191,8 @@ export function ArchitectureExplorer({ architecture, selectedId, onSelect, loadi
             )}
           </div>
           <p className="legend">
-            <span className="dot steerable" /> steerable output · values are real parameter counts
+            <span className="dot steerable" /> dots mark steerable outputs · parameter counts come
+            straight from the loaded model
           </p>
         </>
       )}

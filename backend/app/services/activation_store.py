@@ -7,6 +7,7 @@ bounded by count and total bytes; the oldest experiment is evicted first.
 from __future__ import annotations
 
 import threading
+import warnings
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -19,6 +20,7 @@ from backend.app.schemas.api import (
     ActivationStats,
     ActivationSummary,
     FeatureSeries,
+    FeatureStats,
     HeatmapData,
     HistogramData,
     TokenInfo,
@@ -114,6 +116,30 @@ def _resolve_position(position: int, size: int) -> int:
     return resolved
 
 
+def _feature_stats(array: np.ndarray) -> FeatureStats:
+    """Per-dimension summary over captured positions (NaN-safe, rounded)."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        safe = np.where(np.isfinite(array), array, np.nan)
+        if safe.size == 0:
+            zeros = [0.0] * int(array.shape[1])
+            return FeatureStats(mean=zeros, std=list(zeros), minimum=list(zeros), maximum=list(zeros))
+        mean = np.nanmean(safe, axis=0)
+        std = np.nanstd(safe, axis=0)
+        minimum = np.nanmin(safe, axis=0) if safe.shape[0] else np.zeros(safe.shape[1])
+        maximum = np.nanmax(safe, axis=0) if safe.shape[0] else np.zeros(safe.shape[1])
+
+    def _clean(values: np.ndarray) -> list[float]:
+        return [round(float(value), 6) for value in np.nan_to_num(values, nan=0.0)]
+
+    return FeatureStats(
+        mean=_clean(mean),
+        std=_clean(std),
+        minimum=_clean(minimum),
+        maximum=_clean(maximum),
+    )
+
+
 def build_activation_response(
     experiment: StoredExperiment,
     module_id: str,
@@ -169,6 +195,8 @@ def build_activation_response(
     if resolved_feature < 0 or resolved_feature >= hidden_size:
         raise ValueError(f"feature {feature} is outside the captured range [0, {hidden_size - 1}].")
 
+    feature_stats = _feature_stats(array)
+
     position_indices = _sample_indices(token_count, max_positions)
     feature_indices = _sample_indices(hidden_size, max_features)
     values = array[np.ix_(position_indices, feature_indices)]
@@ -218,6 +246,7 @@ def build_activation_response(
             positions=list(range(token_count)),
             values=[float(value) for value in array[:, resolved_feature]],
         ),
+        feature_stats=feature_stats,
         comparison=comparison,
         warnings=warnings,
     )

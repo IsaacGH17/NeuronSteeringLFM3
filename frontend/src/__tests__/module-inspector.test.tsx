@@ -28,7 +28,7 @@ function renderInspector(overrides: Partial<React.ComponentProps<typeof ModuleIn
 describe("ModuleInspector", () => {
   it("prompts for a selection when none is made", () => {
     renderInspector();
-    expect(screen.getByText("Select a module in the architecture explorer.")).toBeInTheDocument();
+    expect(screen.getByText("Pick a module on the left to look inside it.")).toBeInTheDocument();
   });
 
   it("shows a loading state for the selected module", () => {
@@ -87,7 +87,7 @@ describe("ModuleInspector", () => {
     expect(
       screen.getByText("Embedding output is an embedding lookup, not a hidden state."),
     ).toBeInTheDocument();
-    expect(screen.getByText("No parameters registered directly on this module.")).toBeInTheDocument();
+    expect(screen.getByText("This module holds no parameters of its own.")).toBeInTheDocument();
   });
 
   it("falls back to a saved activation when live metadata is unavailable", () => {
@@ -97,7 +97,7 @@ describe("ModuleInspector", () => {
     });
     expect(screen.getByText("saved run")).toBeInTheDocument();
     expect(
-      screen.getByText("Live module metadata is unavailable; the saved activation tensor is shown below."),
+      screen.getByText("The model isn't loaded right now, so only the tensor saved with this run is shown below."),
     ).toBeInTheDocument();
     expect(screen.getAllByText(/model\.layers\.0\.feed_forward/).length).toBeGreaterThan(0);
   });

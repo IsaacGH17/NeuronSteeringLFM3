@@ -20,6 +20,7 @@ from backend.app.schemas.api import (
     BaselineResponse,
     GenerationSettings,
     SteeringSpec,
+    SuiteCheck,
     TokenInfo,
 )
 from backend.app.services.activation_capture import (
@@ -28,6 +29,7 @@ from backend.app.services.activation_capture import (
     finalize_captures,
     validate_capture_module_ids,
 )
+from backend.app.services.metrics import compute_metrics
 from backend.app.services.model_loader import ModelManager
 from backend.app.services.steering_engine import (
     SteeringSpec as EngineSteeringSpec,
@@ -99,6 +101,17 @@ def _tokenize(tokenizer: Any, text: str, device: str) -> dict[str, Any]:
     return {key: value.to(device) for key, value in encoded.items()}
 
 
+def count_prompt_tokens(
+    tokenizer: Any,
+    prompt: str,
+    system: str | None,
+    enable_thinking: bool,
+) -> int:
+    """Count the templated prompt tokens without touching the accelerator."""
+    templated = _apply_chat_template(tokenizer, prompt, system, enable_thinking)
+    return int(tokenizer(templated, return_tensors="pt")["input_ids"].shape[1])
+
+
 def _generation_kwargs(
     model: Any,
     tokenizer: Any,
@@ -130,6 +143,7 @@ def generate_chat(
     capture_ids: list[str] | None = None,
     steering: SteeringSpec | EngineSteeringSpec | None = None,
     condition: Literal["baseline", "steered", "control"] = "baseline",
+    checks: list[SuiteCheck] | None = None,
 ) -> GenerationResult:
     model = manager.model
     tokenizer = manager.tokenizer
@@ -208,6 +222,16 @@ def generate_chat(
         generated_ids.tolist()[: max(0, captured_token_count - prompt_tokens)],
     )
     status = manager.status()
+    applied_steering: SteeringSpec | None = None
+    if validated_steering is not None:
+        applied_steering = SteeringSpec(
+            module_id=validated_steering.module_id,
+            strength=validated_steering.strength,
+            components=[
+                {"feature_index": index, "weight": weight} for index, weight in validated_steering.components
+            ],
+            normalization=validated_steering.normalization,
+        )
     response = BaselineResponse(
         id=uuid.uuid4().hex,
         timestamp=datetime.now(UTC),
@@ -223,8 +247,9 @@ def generate_chat(
         duration_ms=round(duration_ms, 2),
         tokens_per_second=round(tokens_per_second, 2) if tokens_per_second is not None else None,
         settings=settings,
-        steering=validated_steering,
+        steering=applied_steering,
         captured_modules=list(captures),
+        metrics=compute_metrics(text, checks),
         warnings=warnings + capture_warnings + finalize_warnings,
     )
     return GenerationResult(response=response, tokens=token_infos, captures=captures)
@@ -235,8 +260,11 @@ def generate_baseline(
     request: BaselineRequest,
     *,
     capture_ids: list[str] | None = None,
+    checks: list[SuiteCheck] | None = None,
 ) -> GenerationResult:
-    return generate_chat(manager, request, capture_ids=capture_ids, steering=None, condition="baseline")
+    return generate_chat(
+        manager, request, capture_ids=capture_ids, steering=None, condition="baseline", checks=checks
+    )
 
 
 def generate_steered(
@@ -245,5 +273,8 @@ def generate_steered(
     steering: SteeringSpec | EngineSteeringSpec,
     *,
     capture_ids: list[str] | None = None,
+    checks: list[SuiteCheck] | None = None,
 ) -> GenerationResult:
-    return generate_chat(manager, request, capture_ids=capture_ids, steering=steering, condition="steered")
+    return generate_chat(
+        manager, request, capture_ids=capture_ids, steering=steering, condition="steered", checks=checks
+    )

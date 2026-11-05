@@ -30,12 +30,18 @@ const api = vi.hoisted(() => {
     getModule: vi.fn(),
     runBaseline: vi.fn(),
     runSteering: vi.fn(),
+    runFlow: vi.fn(),
     runSweep: vi.fn(),
     listExperiments: vi.fn(),
     getExperiment: vi.fn(),
     listActivations: vi.fn(),
     getActivation: vi.fn(),
     downloadExport: vi.fn(),
+    listSuites: vi.fn(),
+    computeDirection: vi.fn(),
+    startBatch: vi.fn(),
+    getBatchJob: vi.fn(),
+    cancelBatchJob: vi.fn(),
   };
 });
 
@@ -61,6 +67,7 @@ beforeEach(() => {
       steering: { module_id: "model.layers.0", feature_index: 0, strength: -12 },
     }),
   });
+  api.runFlow.mockReset();
   api.runSweep.mockReset().mockResolvedValue({
     sweep_id: "c".repeat(32),
     runs: [],
@@ -71,6 +78,11 @@ beforeEach(() => {
   api.listActivations.mockReset().mockResolvedValue([]);
   api.getActivation.mockReset().mockResolvedValue(null);
   api.downloadExport.mockReset();
+  api.listSuites.mockReset().mockResolvedValue({ suites: [] });
+  api.computeDirection.mockReset();
+  api.startBatch.mockReset();
+  api.getBatchJob.mockReset();
+  api.cancelBatchJob.mockReset();
 });
 
 async function loadModelAndSelectLayer(user: ReturnType<typeof userEvent.setup>) {
@@ -265,4 +277,60 @@ describe("App", () => {
     expect(window.localStorage.getItem(TOOLTIPS_STORAGE_KEY)).toBe("false");
   });
 
+  it("starts a batch from the panel and shows its progress", async () => {
+    const user = userEvent.setup();
+    const job = {
+      job_id: "abcd1234" + "0".repeat(24),
+      state: "queued" as const,
+      total: 9,
+      completed: 0,
+      current: null,
+      started_at: null,
+      finished_at: null,
+      error: null,
+      plan: "2 modules × 2 strengths = 9 runs",
+      warnings: [],
+      runs: [],
+      cells: [],
+    };
+    api.startBatch.mockResolvedValue(job);
+    api.getBatchJob.mockResolvedValue({ ...job, state: "running", completed: 1 });
+
+    renderApp();
+    await loadModelAndSelectLayer(user);
+    await user.click(screen.getByRole("button", { name: "Set as steering target" }));
+    await user.click(screen.getByRole("button", { name: "Batch" }));
+    await user.click(screen.getByRole("button", { name: "Start batch" }));
+
+    expect(api.startBatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        suite_id: null,
+        prompts: ["Explain what a transformer activation is in two sentences."],
+        plan: expect.objectContaining({
+          module_ids: ["model.layers.0.feed_forward", "model.layers.2.feed_forward"],
+          components: [{ feature_index: 0, weight: 1 }],
+          strengths: [-2, -1, 0, 1, 2],
+          baseline_per_prompt: true,
+        }),
+      }),
+    );
+    expect(await screen.findByText(/Batch abcd1234/)).toBeInTheDocument();
+    expect(await screen.findByText(/0\/9 runs \(0%\)/)).toBeInTheDocument();
+  });
+
+  it("opens the interpret drawer from the topbar", async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await user.click(await screen.findByRole("button", { name: "Interpret" }));
+    expect(screen.getByRole("dialog", { name: "Interpret" })).toBeInTheDocument();
+  });
+
+  it("opens the live flow drawer from the topbar", async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await user.click(await screen.findByRole("button", { name: "Flow" }));
+    expect(screen.getByRole("dialog", { name: "Transformer flow" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Transformer flow" })).not.toBeInTheDocument();
+  });
 });

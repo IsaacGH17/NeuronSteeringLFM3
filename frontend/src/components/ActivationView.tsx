@@ -24,8 +24,8 @@ function tokenLabel(token: TokenInfo): string {
 function colorFor(value: number, maxAbs: number): string {
   const normalized = maxAbs === 0 ? 0 : Math.max(-1, Math.min(1, value / maxAbs));
   const intensity = Math.sqrt(Math.abs(normalized));
-  const base = [16, 14, 11];
-  const target = normalized >= 0 ? [227, 176, 94] : [144, 168, 180];
+  const base = [245, 245, 247];
+  const target = normalized >= 0 ? [255, 149, 0] : [0, 113, 227];
   const rgb = base.map((channel, index) => Math.round(channel + (target[index] - channel) * intensity));
   return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
 }
@@ -65,7 +65,7 @@ function Heatmap({
     if (rows === 0 || columns === 0) return;
     const cellWidth = canvas.width / columns;
     const cellHeight = canvas.height / rows;
-    context.fillStyle = "#100e0b";
+    context.fillStyle = "#f5f5f7";
     context.fillRect(0, 0, canvas.width, canvas.height);
     for (let row = 0; row < rows; row += 1) {
       for (let column = 0; column < columns; column += 1) {
@@ -216,10 +216,10 @@ export function ActivationView({ activation, loading, error, onQuery }: Props) {
   if (!activation) {
     return (
       <div className="placeholder-card">
-        <strong>No activations captured yet</strong>
+        <strong>Nothing captured yet</strong>
         <p>
-          Select a steerable module, tick “Capture activations” in the generation panel, and run a
-          baseline. Only the selected module is captured; nothing is written to disk.
+          Pick a steerable module, tick “Capture activations” in the generation panel, and run a
+          baseline. Only that module is captured, and nothing reaches the disk unless you ask for it.
         </p>
       </div>
     );
@@ -316,6 +316,12 @@ export function ActivationView({ activation, loading, error, onQuery }: Props) {
             activation.feature_series.values[activation.position] ?? Number.NaN,
           )}
         </span>
+        {activation.feature_stats && (
+          <span className="subtle">
+            σ(dim {activation.feature_series.feature}) ={" "}
+            {formatValue(activation.feature_stats.std[activation.feature_series.feature] ?? Number.NaN)}
+          </span>
+        )}
       </div>
 
       <div className="activation-columns">

@@ -8,6 +8,7 @@ import {
   getStatus,
   listExperiments,
   runBaseline,
+  runFlow,
   runSteering,
 } from "../api/client";
 import { DEFAULT_SETTINGS } from "../test/fixtures";
@@ -58,6 +59,27 @@ describe("api client", () => {
       settings: DEFAULT_SETTINGS,
       capture_module_ids: ["model.layers.0"],
       persist_activations: true,
+    });
+  });
+
+  it("sends a flow trace request to the flow endpoint", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ layers: [] }));
+    await runFlow({
+      prompt: "Hello",
+      system: null,
+      settings: DEFAULT_SETTINGS,
+      cluster_k: 6,
+      cluster_max_positions: 128,
+    });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/experiments/flow");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({
+      prompt: "Hello",
+      system: null,
+      settings: DEFAULT_SETTINGS,
+      cluster_k: 6,
+      cluster_max_positions: 128,
     });
   });
 

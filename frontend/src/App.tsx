@@ -1,21 +1,27 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
+  cancelBatchJob,
   getActivation,
   getArchitecture,
+  getBatchJob,
   getDiagnostics,
   getModule,
   getStatus,
   listActivations,
+  listSuites,
   loadModel as apiLoadModel,
   runBaseline,
   runSteering,
   runSweep,
+  startBatch,
 } from "./api/client";
 import { ArchitectureExplorer } from "./components/ArchitectureExplorer";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
 import { ExperimentHistory } from "./components/ExperimentHistory";
+import { FlowDrawer } from "./components/FlowDrawer";
 import { GenerationPanel } from "./components/GenerationPanel";
+import { InterpretDrawer } from "./components/InterpretDrawer";
 import { HelpPanel } from "./components/HelpPanel";
 import { ModuleInspector } from "./components/ModuleInspector";
 import { useTooltips } from "./ui/tooltips";
@@ -23,10 +29,15 @@ import type {
   ActivationResponse,
   Architecture,
   BaselineResponse,
+  BatchJob,
+  BatchRequest,
   Diagnostics,
+  DirectionResponse,
   GenerationSettings,
   ModelStatus,
   ModuleDetail,
+  ModulePreset,
+  PromptSuite,
   SteeringResponse,
   SteeringSpec,
   SweepResponse,
@@ -72,6 +83,12 @@ export default function App() {
   const [steeringTargetId, setSteeringTargetId] = useState<string | null>(null);
   const [compareWith, setCompareWith] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [interpretOpen, setInterpretOpen] = useState(false);
+  const [flowOpen, setFlowOpen] = useState(false);
+  const [direction, setDirection] = useState<DirectionResponse | null>(null);
+  const [suites, setSuites] = useState<PromptSuite[]>([]);
+  const [batchJob, setBatchJob] = useState<BatchJob | null>(null);
+  const [batchError, setBatchError] = useState<string | null>(null);
   const { enabled: tooltipsEnabled, setEnabled: setTooltipsEnabled } = useTooltips();
   const [historyRefresh, setHistoryRefresh] = useState(0);
   const selectionRequest = useRef(0);
@@ -122,6 +139,62 @@ export default function App() {
     };
   }, [loadArchitecture, refreshDiagnostics]);
 
+  useEffect(() => {
+    let cancelled = false;
+    listSuites()
+      .then((response) => {
+        if (!cancelled) setSuites(response.suites);
+      })
+      .catch(() => {
+        if (!cancelled) setSuites([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!batchJob) return;
+    if (batchJob.state !== "queued" && batchJob.state !== "running") return;
+    const timer = setTimeout(() => {
+      getBatchJob(batchJob.job_id)
+        .then((next) => setBatchJob(next))
+        .catch((error) => setBatchError(errorMessage(error)));
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [batchJob]);
+
+  useEffect(() => {
+    if (!batchJob) return;
+    if (batchJob.state === "completed" || batchJob.state === "cancelled" || batchJob.state === "failed") {
+      setHistoryRefresh((value) => value + 1);
+      void refreshDiagnostics();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batchJob?.state]);
+
+  const modulePresets = useMemo<ModulePreset[]>(() => {
+    if (!architecture) return [];
+    return [
+      {
+        id: "ffn",
+        label: "MLP outputs",
+        modules: architecture.layer_overview.map((block) => ({
+          module_id: block.ffn_module_id,
+          layer_index: block.layer_index,
+        })),
+      },
+      {
+        id: "layers",
+        label: "Decoder layer outputs",
+        modules: architecture.layer_overview.map((block) => ({
+          module_id: block.module_id,
+          layer_index: block.layer_index,
+        })),
+      },
+    ];
+  }, [architecture]);
+
   const handleLoad = async () => {
     setLoadingModel(true);
     setLoadError(null);
@@ -129,6 +202,8 @@ export default function App() {
       const next = await apiLoadModel();
       setStatus(next);
       setSteeringTargetId(null);
+      setDirection(null);
+      setBatchJob(null);
       await Promise.all([loadArchitecture(), refreshDiagnostics()]);
     } catch (error) {
       setLoadError(errorMessage(error));
@@ -260,7 +335,9 @@ export default function App() {
     system: string | null;
     settings: GenerationSettings;
     module_id: string;
-    feature_index: number;
+    feature_index: number | null;
+    components?: { feature_index: number; weight: number }[];
+    normalization?: "raw" | "sigma";
     strengths: number[];
     include_control: boolean;
     control_seed: number | null;
@@ -315,6 +392,41 @@ export default function App() {
     }
   };
 
+  const handleStartBatch = async (payload: BatchRequest) => {
+    setBatchError(null);
+    try {
+      const job = await startBatch(payload);
+      setBatchJob(job);
+    } catch (error) {
+      setBatchError(errorMessage(error));
+    }
+  };
+
+  const handleCancelBatch = async () => {
+    if (!batchJob) return;
+    setBatchError(null);
+    try {
+      setBatchJob(await cancelBatchJob(batchJob.job_id));
+    } catch (error) {
+      setBatchError(errorMessage(error));
+    }
+  };
+
+  const handleDirectionBuilt = (built: DirectionResponse) => {
+    setDirection(built);
+    setSteeringTargetId(built.module_id);
+    setGenerationError(null);
+  };
+
+  const layerModules = useMemo(
+    () =>
+      (architecture?.layer_overview ?? []).map((block) => ({
+        layer_index: block.layer_index,
+        module_id: block.module_id,
+      })),
+    [architecture],
+  );
+
   return (
     <div className="app">
       <header className="topbar">
@@ -337,6 +449,20 @@ export default function App() {
             />
             <span>Tooltips</span>
           </label>
+          <button
+            className="secondary topbar-button"
+            onClick={() => setFlowOpen(true)}
+            aria-haspopup="dialog"
+          >
+            Flow
+          </button>
+          <button
+            className="secondary topbar-button"
+            onClick={() => setInterpretOpen(true)}
+            aria-haspopup="dialog"
+          >
+            Interpret
+          </button>
           <button
             className="secondary topbar-button"
             onClick={() => setHelpOpen(true)}
@@ -397,11 +523,39 @@ export default function App() {
           onRun={handleRunBaseline}
           onRunSteered={handleRunSteered}
           onRunSweep={handleRunSweep}
+          direction={direction}
+          onClearDirection={() => setDirection(null)}
+          modulePresets={modulePresets}
+          suites={suites}
+          batchJob={batchJob}
+          batchError={batchError}
+          onStartBatch={handleStartBatch}
+          onCancelBatch={handleCancelBatch}
         />
       </main>
 
+      <FlowDrawer
+        open={flowOpen}
+        disabled={!status.loaded}
+        onClose={() => setFlowOpen(false)}
+        onUseDirection={(built) => {
+          handleDirectionBuilt(built);
+          setFlowOpen(false);
+        }}
+        onExperimentRecorded={() => setHistoryRefresh((value) => value + 1)}
+      />
+      <InterpretDrawer
+        open={interpretOpen}
+        onClose={() => setInterpretOpen(false)}
+        layers={layerModules}
+        defaultModuleId={steeringTargetId ?? layerModules[Math.floor(layerModules.length / 2)]?.module_id ?? null}
+      />
       <HelpPanel open={helpOpen} onClose={() => setHelpOpen(false)} />
-      <ExperimentHistory refreshTrigger={historyRefresh} onOpenActivations={handleOpenHistoricalActivations} />
+      <ExperimentHistory
+        refreshTrigger={historyRefresh}
+        onOpenActivations={handleOpenHistoricalActivations}
+        onDirectionBuilt={handleDirectionBuilt}
+      />
       <DiagnosticsPanel diagnostics={diagnostics} />
     </div>
   );

@@ -4,7 +4,13 @@ import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { GenerationPanel } from "../components/GenerationPanel";
 import { baselineFixture, DEFAULT_SETTINGS } from "../test/fixtures";
-import type { SteeringResponse, SweepResponse } from "../types";
+import type {
+  BatchJob,
+  PromptSuite,
+  SteeringResponse,
+  SweepResponse,
+  TextMetrics,
+} from "../types";
 
 const noop = () => undefined;
 
@@ -38,7 +44,7 @@ describe("GenerationPanel", () => {
   it("disables generation and explains why when the model is not loaded", async () => {
     const user = userEvent.setup();
     renderPanel({ disabled: true });
-    expect(screen.getByText("Load the model to enable generation.")).toBeInTheDocument();
+    expect(screen.getByText("Load the model first and generation switches on.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run baseline" })).toBeDisabled();
 
     await openMode(user, "Steered");
@@ -54,7 +60,7 @@ describe("GenerationPanel", () => {
     expect(screen.getByText("No module selected")).toBeInTheDocument();
     await openMode(user, "Steered");
     expect(screen.getByRole("button", { name: "Run baseline + steered" })).toBeDisabled();
-    expect(screen.getByText("Set a steering target to run this mode.")).toBeInTheDocument();
+    expect(screen.getByText("Choose a steering target for this mode.")).toBeInTheDocument();
 
     await openMode(user, "Sweep");
     expect(screen.getByRole("button", { name: "Run sweep" })).toBeDisabled();
@@ -172,10 +178,10 @@ describe("GenerationPanel", () => {
     await user.clear(featureInput);
     await user.type(featureInput, "9999");
     await user.clear(screen.getByLabelText("Strength α"));
-    await user.type(screen.getByLabelText("Strength α"), "100");
+    await user.type(screen.getByLabelText("Strength α"), "5000");
 
     expect(screen.getByText("Hidden dimension clamped to 2047.")).toBeInTheDocument();
-    expect(screen.getByText("Strength clamped to 49.5.")).toBeInTheDocument();
+    expect(screen.getByText(/Strength clamped to 1000/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Run baseline + steered" }));
 
@@ -183,7 +189,7 @@ describe("GenerationPanel", () => {
       expect.any(String),
       null,
       DEFAULT_SETTINGS,
-      { module_id: "model.layers.0.feed_forward", feature_index: 2047, strength: 49.5 },
+      { module_id: "model.layers.0.feed_forward", feature_index: 2047, strength: 1000 },
       [],
       false,
     );
@@ -217,7 +223,7 @@ describe("GenerationPanel", () => {
     });
     await openMode(user, "Sweep");
 
-    const strengths = screen.getByLabelText("Strengths α (comma-separated, 1–9 values)");
+    const strengths = screen.getByLabelText("Strengths α (comma-separated, 1–32 values)");
     await user.clear(strengths);
     await user.type(strengths, "1,oops");
     await user.click(screen.getByRole("button", { name: "Run sweep" }));
@@ -236,7 +242,7 @@ describe("GenerationPanel", () => {
     });
     await openMode(user, "Sweep");
 
-    const strengths = screen.getByLabelText("Strengths α (comma-separated, 1–9 values)");
+    const strengths = screen.getByLabelText("Strengths α (comma-separated, 1–32 values)");
     await user.clear(strengths);
     await user.type(strengths, "-10, 10");
     await user.click(screen.getByLabelText("Include random-feature control"));
@@ -256,6 +262,221 @@ describe("GenerationPanel", () => {
       capture_module_ids: [],
       persist_activations: false,
     });
+  });
+
+
+  it("submits a multi-dimension direction with weights", async () => {
+    const onRunSteered = vi.fn();
+    const user = userEvent.setup();
+    renderPanel({
+      onRunSteered,
+      selectedSteerableId: "model.layers.0.feed_forward",
+      steeringTargetId: "model.layers.0.feed_forward",
+    });
+    await openMode(user, "Steered");
+
+    fireEvent.change(screen.getByLabelText("New dimension (0–2047)"), { target: { value: "5" } });
+    fireEvent.change(screen.getByLabelText("Weight"), { target: { value: "0.5" } });
+    await user.click(screen.getByRole("button", { name: "Add dimension" }));
+    fireEvent.change(screen.getByLabelText("New dimension (0–2047)"), { target: { value: "9" } });
+    fireEvent.change(screen.getByLabelText("Weight"), { target: { value: "-1" } });
+    await user.click(screen.getByRole("button", { name: "Add dimension" }));
+    fireEvent.change(screen.getByLabelText("Strength α"), { target: { value: "2" } });
+
+    await user.click(screen.getByRole("button", { name: "Run baseline + steered" }));
+
+    expect(onRunSteered).toHaveBeenCalledWith(
+      expect.any(String),
+      null,
+      DEFAULT_SETTINGS,
+      {
+        module_id: "model.layers.0.feed_forward",
+        strength: 2,
+        feature_index: null,
+        components: [
+          { feature_index: 5, weight: 0.5 },
+          { feature_index: 9, weight: -1 },
+        ],
+        normalization: "raw",
+      },
+      [],
+      false,
+    );
+  });
+
+  it("can steer a single dimension in sigma units", async () => {
+    const onRunSteered = vi.fn();
+    const user = userEvent.setup();
+    renderPanel({
+      onRunSteered,
+      selectedSteerableId: "model.layers.0.feed_forward",
+      steeringTargetId: "model.layers.0.feed_forward",
+    });
+    await openMode(user, "Steered");
+
+    await user.selectOptions(screen.getByLabelText("Normalization"), "sigma");
+    fireEvent.change(screen.getByLabelText("Strength α"), { target: { value: "1.5" } });
+
+    await user.click(screen.getByRole("button", { name: "Run baseline + steered" }));
+
+    expect(onRunSteered).toHaveBeenCalledWith(
+      expect.any(String),
+      null,
+      DEFAULT_SETTINGS,
+      {
+        module_id: "model.layers.0.feed_forward",
+        feature_index: 0,
+        strength: 1.5,
+        normalization: "sigma",
+      },
+      [],
+      false,
+    );
+  });
+
+  it("adopts a direction built from two runs", async () => {
+    const onClearDirection = vi.fn();
+    const user = userEvent.setup();
+    renderPanel({
+      selectedSteerableId: "model.layers.0.feed_forward",
+      steeringTargetId: "model.layers.0.feed_forward",
+      onClearDirection,
+      direction: {
+        module_id: "model.layers.0.feed_forward",
+        components: [
+          { feature_index: 3, weight: 1 },
+          { feature_index: 7, weight: -0.4 },
+        ],
+        sigma: [0.1, 0.2],
+        norm: 1.2,
+        separation: 2.5,
+        positions_compared: 6,
+        warnings: [],
+      },
+    });
+
+    expect(screen.getByText("direction · 2 dims")).toBeInTheDocument();
+    await openMode(user, "Steered");
+    expect(screen.getByRole("button", { name: "Remove dimension 3" })).toHaveTextContent("#3 ×1");
+    expect(screen.getByRole("button", { name: "Remove dimension 7" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clear direction" }));
+    expect(onClearDirection).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Remove dimension 3" })).not.toBeInTheDocument();
+  });
+
+  it("starts a batch from a suite and a module preset", async () => {
+    const onStartBatch = vi.fn();
+    const user = userEvent.setup();
+    const suite: PromptSuite = {
+      id: "capability-core",
+      name: "Capability checks",
+      description: "Ten verifiable tasks.",
+      kind: "capability",
+      prompts: [{ id: "c1", text: "Do the thing.", tags: [], checks: [] }],
+    };
+    renderPanel({
+      onStartBatch,
+      suites: [suite],
+      modulePresets: [
+        {
+          id: "ffn",
+          label: "MLP outputs",
+          modules: [
+            { module_id: "model.layers.0.feed_forward", layer_index: 0 },
+            { module_id: "model.layers.1.feed_forward", layer_index: 1 },
+          ],
+        },
+      ],
+      selectedSteerableId: "model.layers.0.feed_forward",
+      steeringTargetId: "model.layers.0.feed_forward",
+    });
+    await openMode(user, "Batch");
+
+    await user.selectOptions(screen.getByLabelText("Prompt source"), "capability-core");
+    fireEvent.change(screen.getByLabelText("Layers to"), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText("Strengths α (comma-separated)"), {
+      target: { value: "1,-1" },
+    });
+    fireEvent.change(screen.getByLabelText("Repeats (1–10)"), { target: { value: "2" } });
+
+    await user.click(screen.getByRole("button", { name: "Start batch" }));
+
+    expect(onStartBatch).toHaveBeenCalledWith({
+      suite_id: "capability-core",
+      prompts: [],
+      system: null,
+      settings: DEFAULT_SETTINGS,
+      plan: {
+        module_ids: ["model.layers.0.feed_forward"],
+        components: [{ feature_index: 0, weight: 1 }],
+        normalization: "raw",
+        strengths: [1, -1],
+        include_control: false,
+        control_seed: null,
+        repeats: 2,
+        baseline_per_prompt: true,
+      },
+      capture_module_ids: [],
+      persist_activations: false,
+    });
+  });
+
+  it("shows batch progress and cancels it", async () => {
+    const onCancelBatch = vi.fn();
+    const user = userEvent.setup();
+    const job: BatchJob = {
+      job_id: "abcd1234" + "0".repeat(24),
+      state: "running",
+      total: 10,
+      completed: 3,
+      current: "c1 · model.layers.0 · α 1",
+      started_at: null,
+      finished_at: null,
+      error: null,
+      plan: "capability · 1 module × 2 strengths = 10 runs",
+      warnings: [],
+      runs: [],
+      cells: [
+        {
+          kind: "steered",
+          module_id: "model.layers.0.feed_forward",
+          strength: 1,
+          runs: 2,
+          words_mean: 12.5,
+          distinct_3_mean: 0.9,
+          refusal_rate: 0,
+          checks_passed_rate: 0.5,
+          lexicon_mean: { warmth: 1.2 },
+        },
+      ],
+    };
+    renderPanel({ batchJob: job, onCancelBatch });
+
+    expect(screen.getByText(/Batch abcd1234/)).toBeInTheDocument();
+    expect(screen.getByText(/3\/10 runs \(30%\)/)).toBeInTheDocument();
+    expect(screen.getByText("50%")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Cancel batch" }));
+    expect(onCancelBatch).toHaveBeenCalled();
+  });
+
+  it("shows measured text metrics next to a result", () => {
+    const metrics: TextMetrics = {
+      words: 9,
+      characters: 48,
+      sentences: 2,
+      avg_words_per_sentence: 4.5,
+      distinct_3: 0.85,
+      repeated_4gram_ratio: 0.05,
+      refusal: false,
+      lexicon: { warmth: 3.2 },
+      checks: [],
+      checks_passed: null,
+      checks_total: null,
+    };
+    renderPanel({ result: baselineFixture({ metrics }) });
+    expect(screen.getByText(/9 words · distinct-3 0.85/)).toBeInTheDocument();
+    expect(screen.getByText(/warmth 3.2/)).toBeInTheDocument();
   });
 
   it("renders a baseline result with measured metadata", () => {

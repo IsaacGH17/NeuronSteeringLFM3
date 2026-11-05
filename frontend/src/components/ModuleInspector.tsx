@@ -40,11 +40,11 @@ export function ModuleInspector({
       <header className="panel-header">
         <div>
           <h2>Module inspector</h2>
-          <p className="subtle">Module metadata comes from the loaded model; activations can come from a live run or a saved snapshot.</p>
+          <p className="subtle">Everything here is read from the loaded model. Activations can come from a live run or a saved snapshot.</p>
         </div>
       </header>
 
-      {!selectedId && <div className="empty">Select a module in the architecture explorer.</div>}
+      {!selectedId && <div className="empty">Pick a module on the left to look inside it.</div>}
       {selectedId && loading && <div className="empty">Loading {selectedId}…</div>}
       {error && <div className="error-banner">{error}</div>}
 
@@ -55,9 +55,9 @@ export function ModuleInspector({
             <span className="badge muted-badge">saved run</span>
           </div>
           <p className="subtle">
-            Live module metadata is unavailable; the saved activation tensor is shown below.
+            The model isn't loaded right now, so only the tensor saved with this run is shown below.
           </p>
-          <h4>Activations</h4>
+          <h4 className="eyebrow">Activations</h4>
           <ActivationView
             activation={activation}
             loading={activationLoading}
@@ -83,7 +83,7 @@ export function ModuleInspector({
                   tooltipsEnabled,
                   steeringTargetId === detail.id
                     ? "This module is already the steering target"
-                    : "Use this module for steered and sweep runs without changing what you inspect",
+                    : "Steer this module without changing what you are inspecting",
                 )}
               >
                 {steeringTargetId === detail.id ? "Steering target" : "Set as steering target"}
@@ -120,7 +120,7 @@ export function ModuleInspector({
 
           <div className={`callout ${detail.supports_steering ? "ok" : "muted"}`}>{detail.steering_reason}</div>
 
-          <h4>Activations</h4>
+          <h4 className="eyebrow">Activations</h4>
           <ActivationView
             activation={activation}
             loading={activationLoading}
@@ -130,7 +130,7 @@ export function ModuleInspector({
 
           <h4>Direct parameters</h4>
           {detail.parameters.length === 0 ? (
-            <p className="subtle">No parameters registered directly on this module.</p>
+            <p className="subtle">This module holds no parameters of its own.</p>
           ) : (
             <table className="data-table">
               <thead>

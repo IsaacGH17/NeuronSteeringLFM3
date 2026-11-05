@@ -11,7 +11,7 @@ describe("ArchitectureExplorer", () => {
     render(
       <ArchitectureExplorer architecture={null} selectedId={null} onSelect={noop} loading={false} capturedIds={new Set()} />,
     );
-    expect(screen.getByText("Load the model to discover its real module hierarchy.")).toBeInTheDocument();
+    expect(screen.getByText("Load the model and its real module tree will appear here.")).toBeInTheDocument();
   });
 
   it("shows a loading state while discovery is in flight", () => {

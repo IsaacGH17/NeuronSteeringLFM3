@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { downloadExport, getExperiment, listExperiments } from "../api/client";
-import type { ExperimentDetail, ExperimentSummary } from "../types";
+import { computeDirection, downloadExport, getExperiment, listExperiments } from "../api/client";
+import type { DirectionResponse, ExperimentDetail, ExperimentSummary } from "../types";
 import { tooltipTitle, useTooltips } from "../ui/tooltips";
 
 interface Props {
   refreshTrigger: number;
   onOpenActivations: (experimentId: string, moduleId: string) => void;
+  onDirectionBuilt?: (direction: DirectionResponse) => void;
 }
 
 function formatTime(timestamp: string): string {
@@ -32,13 +33,14 @@ function conditionLabel(summary: ExperimentSummary): string {
 }
 
 function steeringLabel(summary: ExperimentSummary): string {
+  if (summary.steering_summary) return summary.steering_summary;
   if (!summary.module_id) return "—";
   const feature = summary.feature_index ?? "—";
   const strength = summary.strength ?? "—";
   return `${summary.module_id} · dim ${feature} · α ${strength}`;
 }
 
-export function ExperimentHistory({ refreshTrigger, onOpenActivations }: Props) {
+export function ExperimentHistory({ refreshTrigger, onOpenActivations, onDirectionBuilt }: Props) {
   const { enabled: tooltipsEnabled } = useTooltips();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<ExperimentSummary[]>([]);
@@ -53,6 +55,8 @@ export function ExperimentHistory({ refreshTrigger, onOpenActivations }: Props) 
   const [compareDetails, setCompareDetails] = useState<Record<string, ExperimentDetail>>({});
   const [limit, setLimit] = useState(20);
   const [offset, setOffset] = useState(0);
+  const [directionLoading, setDirectionLoading] = useState(false);
+  const [directionError, setDirectionError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -129,13 +133,45 @@ export function ExperimentHistory({ refreshTrigger, onOpenActivations }: Props) 
     });
   };
 
-  const selectedForCompare = items.filter((item) => compareIds.has(item.id));
+  // Preserve the click order: the first selected run is the positive side of a
+  // direction, the second is the negative side.
+  const selectedForCompare = [...compareIds]
+    .map((id) => items.find((item) => item.id === id))
+    .filter((item): item is ExperimentSummary => Boolean(item));
   const canExportSelected = selectedForCompare.length > 0;
+  const canBuildDirection =
+    selectedForCompare.length === 2 &&
+    selectedForCompare.every((item) => item.has_activations && item.activation_source) &&
+    Boolean(onDirectionBuilt);
+
+  const buildDirection = async () => {
+    if (!onDirectionBuilt || selectedForCompare.length !== 2) return;
+    const [positive, negative] = selectedForCompare;
+    setDirectionLoading(true);
+    setDirectionError(null);
+    try {
+      const built = await computeDirection({
+        positive_experiment_id: positive.id,
+        negative_experiment_id: negative.id,
+        top_k: 8,
+      });
+      onDirectionBuilt(built);
+    } catch (error) {
+      setDirectionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDirectionLoading(false);
+    }
+  };
 
   return (
     <section className={`history ${open ? "open" : ""}`}>
       <button className="history-toggle" onClick={() => setOpen((value) => !value)}>
-        <span>{open ? "▾" : "▸"} Experiment history</span>
+        <span>
+          <span className="disclosure" aria-hidden="true">
+            {open ? "▾" : "▸"}
+          </span>{" "}
+          Experiment history
+        </span>
         <span className="subtle">{total} saved run{total === 1 ? "" : "s"}</span>
       </button>
 
@@ -168,7 +204,7 @@ export function ExperimentHistory({ refreshTrigger, onOpenActivations }: Props) 
                 disabled={!canExportSelected}
                 title={tooltipTitle(
                   tooltipsEnabled,
-                  canExportSelected ? "Export selected as JSONL" : "Select one or two rows to export",
+                  canExportSelected ? "Export selected as JSONL" : "Tick one or two rows to export them",
                 )}
               >
                 Export selected JSONL
@@ -179,7 +215,7 @@ export function ExperimentHistory({ refreshTrigger, onOpenActivations }: Props) 
                 disabled={!canExportSelected}
                 title={tooltipTitle(
                   tooltipsEnabled,
-                  canExportSelected ? "Export selected as CSV" : "Select one or two rows to export",
+                  canExportSelected ? "Export selected as CSV" : "Tick one or two rows to export them",
                 )}
               >
                 Export selected CSV
@@ -202,7 +238,7 @@ export function ExperimentHistory({ refreshTrigger, onOpenActivations }: Props) 
           {error && <div className="error-banner">{error}</div>}
           {loading && items.length === 0 && <div className="empty">Loading history…</div>}
           {!loading && items.length === 0 && !error && (
-            <div className="empty">No saved experiments yet. Run a baseline, steered, or sweep experiment to build history.</div>
+            <div className="empty">Nothing saved yet. Run a baseline, steered, or sweep experiment and it will land here.</div>
           )}
 
           {items.length > 0 && (
@@ -256,7 +292,7 @@ export function ExperimentHistory({ refreshTrigger, onOpenActivations }: Props) 
                                 className="badge activation-none"
                                 title={tooltipTitle(
                                   tooltipsEnabled,
-                                  "Captured at run time, but no live or saved tensor remains.",
+                                  "Captured during the run, but no live or saved tensor is left.",
                                 )}
                               >
                                 unavailable
@@ -296,7 +332,7 @@ export function ExperimentHistory({ refreshTrigger, onOpenActivations }: Props) 
                 {detailLoading && <div className="empty">Loading detail…</div>}
                 {detailError && <div className="error-banner">{detailError}</div>}
                 {!detailLoading && !detail && !detailError && (
-                  <div className="empty">Select a row to view experiment detail.</div>
+                  <div className="empty">Pick a row to read the full record.</div>
                 )}
                 {detail && (
                   <>
@@ -365,7 +401,7 @@ export function ExperimentHistory({ refreshTrigger, onOpenActivations }: Props) 
 
                     <div className="history-section">
                       <h5>Output</h5>
-                      <pre className="output small">{detail.output || "(empty output)"}</pre>
+                      <pre className="output small">{detail.output || "(no text generated)"}</pre>
                     </div>
 
                     {detail.captures.length > 0 && (
@@ -437,9 +473,9 @@ export function ExperimentHistory({ refreshTrigger, onOpenActivations }: Props) 
                         title={tooltipTitle(
                           tooltipsEnabled,
                           !detail.captured_modules.length
-                            ? "No captured modules recorded."
+                            ? "This run recorded no captured modules."
                             : !detail.activation_source
-                              ? "Activations were captured but are no longer available; enable snapshot persistence on future runs."
+                              ? "Activations were captured but are gone now. Turn on snapshot persistence for future runs."
                               : "Load the first captured module into the inspector",
                         )}
                       >
@@ -473,6 +509,31 @@ export function ExperimentHistory({ refreshTrigger, onOpenActivations }: Props) 
                   );
                 })}
               </div>
+
+              {selectedForCompare.length === 2 && (
+                <div className="history-direction">
+                  <div className="history-direction-head">
+                    <h5>Steering direction</h5>
+                    <button
+                      className="secondary small"
+                      onClick={() => void buildDirection()}
+                      disabled={!canBuildDirection || directionLoading}
+                      title={
+                        canBuildDirection
+                          ? "Subtract the second run's captured states from the first run's"
+                          : "Both selected runs need available activations"
+                      }
+                    >
+                      {directionLoading ? "Building…" : "Build direction"}
+                    </button>
+                  </div>
+                  <p className="subtle">
+                    The first selected run is the positive side, the second is the negative side. Their
+                    captured states are averaged and subtracted into a weighted set of dimensions.
+                  </p>
+                  {directionError && <div className="error-banner inline">{directionError}</div>}
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -14,15 +14,26 @@ from backend.app.schemas.api import (
     ArchitectureResponse,
     BaselineRequest,
     BaselineResponse,
+    BatchJobResponse,
+    BatchRequest,
     DiagnosticsResponse,
+    DirectionRequest,
+    DirectionResponse,
     ExperimentDetail,
     ExperimentListResponse,
+    FlowRequest,
+    FlowResponse,
     HealthResponse,
+    LensRequest,
+    LensResponse,
     LoadModelRequest,
     ModelStatus,
     ModuleDetail,
+    PatchRequest,
+    PatchResponse,
     SteeringRequest,
     SteeringResponse,
+    SuiteListResponse,
     SweepRequest,
     SweepResponse,
     SweepRun,
@@ -32,14 +43,20 @@ from backend.app.services.activation_store import (
     build_activation_response,
 )
 from backend.app.services.architecture_inspector import build_architecture, describe_module
+from backend.app.services.direction import compute_direction
 from backend.app.services.experiment_store import ExperimentStore
+from backend.app.services.flow import trace_flow
 from backend.app.services.generation import generate_baseline, generate_steered
+from backend.app.services.jobs import BatchJobRegistry
+from backend.app.services.lens import compute_lens
 from backend.app.services.model_loader import (
     ModelLoadError,
     ModelManager,
     ModelNotLoadedError,
 )
+from backend.app.services.patching import run_patch
 from backend.app.services.steering_engine import validate_steering_spec
+from backend.app.services.suites import list_suites
 from backend.app.services.sweep import run_sweep
 
 router = APIRouter(prefix="/api")
@@ -51,6 +68,10 @@ def get_manager(request: Request) -> ModelManager:
 
 def get_store(request: Request) -> ExperimentStore:
     return request.app.state.experiment_store
+
+
+def get_registry(request: Request) -> BatchJobRegistry:
+    return request.app.state.batch_jobs
 
 
 def _require_loaded(manager: ModelManager) -> None:
@@ -189,6 +210,24 @@ def steering(payload: SteeringRequest, request: Request) -> SteeringResponse:
         raise _fail(exc) from exc
 
 
+@router.post("/experiments/flow", response_model=FlowResponse)
+def flow(payload: FlowRequest, request: Request) -> FlowResponse:
+    """Trace one real generation across every decoder layer."""
+    manager = get_manager(request)
+    _require_loaded(manager)
+    try:
+        _, flow_response = trace_flow(
+            manager,
+            payload,
+            on_generation=lambda generated: _record(
+                generated, request, persist_activations=payload.persist_activations
+            ),
+        )
+        return flow_response
+    except (ModelNotLoadedError, torch.cuda.OutOfMemoryError, ValueError) as exc:
+        raise _fail(exc) from exc
+
+
 @router.post("/experiments/sweep", response_model=SweepResponse)
 def sweep(payload: SweepRequest, request: Request) -> SweepResponse:
     manager = get_manager(request)
@@ -280,6 +319,76 @@ def export_experiments(
         media_type=media_type,
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+@router.get("/suites", response_model=SuiteListResponse)
+def suites() -> SuiteListResponse:
+    return SuiteListResponse(suites=list_suites())
+
+
+@router.post("/experiments/direction", response_model=DirectionResponse)
+def steering_direction(payload: DirectionRequest, request: Request) -> DirectionResponse:
+    store = get_store(request)
+    try:
+        positive = _get_experiment(store, payload.positive_experiment_id)
+        negative = _get_experiment(store, payload.negative_experiment_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        return compute_direction(positive, negative, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/experiments/batch", response_model=BatchJobResponse, status_code=202)
+def start_batch(payload: BatchRequest, request: Request) -> BatchJobResponse:
+    manager = get_manager(request)
+    _require_loaded(manager)
+    payload.capture_module_ids = list(dict.fromkeys(payload.capture_module_ids))
+    try:
+        return get_registry(request).start(payload)
+    except (ModelNotLoadedError, torch.cuda.OutOfMemoryError, ValueError) as exc:
+        raise _fail(exc) from exc
+
+
+@router.get("/experiments/batch/{job_id}", response_model=BatchJobResponse)
+def batch_status(
+    job_id: str,
+    request: Request,
+    include_runs: bool = Query(default=False),
+) -> BatchJobResponse:
+    try:
+        return get_registry(request).get(job_id, include_runs=include_runs)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/experiments/batch/{job_id}/cancel", response_model=BatchJobResponse)
+def cancel_batch(job_id: str, request: Request) -> BatchJobResponse:
+    try:
+        return get_registry(request).cancel(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/experiments/lens", response_model=LensResponse)
+def logit_lens(payload: LensRequest, request: Request) -> LensResponse:
+    manager = get_manager(request)
+    _require_loaded(manager)
+    try:
+        return compute_lens(manager, payload)
+    except (ModelNotLoadedError, torch.cuda.OutOfMemoryError, ValueError) as exc:
+        raise _fail(exc) from exc
+
+
+@router.post("/experiments/patch", response_model=PatchResponse)
+def activation_patch(payload: PatchRequest, request: Request) -> PatchResponse:
+    manager = get_manager(request)
+    _require_loaded(manager)
+    try:
+        return run_patch(manager, payload)
+    except (ModelNotLoadedError, torch.cuda.OutOfMemoryError, ValueError) as exc:
+        raise _fail(exc) from exc
 
 
 @router.get("/experiments/{experiment_id}", response_model=ExperimentDetail)

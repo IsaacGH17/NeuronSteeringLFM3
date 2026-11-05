@@ -353,7 +353,7 @@ def test_sweep_validation_errors(client: TestClient):
         "prompt": "Too many",
         "module_id": "model.layers.0.feed_forward",
         "feature_index": 5,
-        "strengths": list(range(10)),
+        "strengths": [float(value) for value in range(33)],
     }
     response = client.post("/api/experiments/sweep", json=payload)
     assert response.status_code == 422
@@ -363,7 +363,7 @@ def test_sweep_validation_errors(client: TestClient):
         "prompt": "Too strong",
         "module_id": "model.layers.0.feed_forward",
         "feature_index": 5,
-        "strengths": [1000.0],
+        "strengths": [2000.0],
     }
     response = client.post("/api/experiments/sweep", json=payload)
     assert response.status_code == 400

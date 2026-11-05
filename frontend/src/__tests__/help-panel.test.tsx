@@ -19,6 +19,7 @@ describe("HelpPanel", () => {
     expect(screen.getByRole("heading", { name: "Steering α" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Controls and sweeps" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Reproducibility" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Live flow" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalled();

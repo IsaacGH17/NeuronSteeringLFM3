@@ -15,6 +15,7 @@ const TOPICS = [
   ["help-repro", "Reproducibility"],
   ["help-hooks", "Hooks and safety"],
   ["help-reading", "Reading results"],
+  ["help-flow", "Live flow"],
   ["help-data", "Capture and storage"],
   ["help-limits", "Limitations"],
 ] as const;
@@ -51,7 +52,7 @@ export function HelpPanel({ open, onClose }: Props) {
       >
         <header className="help-header">
           <div>
-            <p className="help-kicker">Reference</p>
+            <p className="help-kicker">Field notes</p>
             <h2 id="help-title">Help &amp; key concepts</h2>
           </div>
           <button ref={closeRef} className="secondary" onClick={onClose}>
@@ -61,9 +62,9 @@ export function HelpPanel({ open, onClose }: Props) {
 
         <div className="help-body">
           <p className="help-lede">
-            This is a research instrument, not a chatbot. Every module, tensor, index, and output shown in
-            the workspace comes from the loaded model. Steering changes inference activations only; it never
-            edits the model weights.
+            This is a bench for looking at the model's insides, not a chatbot. Every module, tensor, index,
+            and output you see comes from the loaded model itself. Steering only shifts activations while the
+            model runs; the weights never change.
           </p>
 
           <nav className="help-toc" aria-label="Help topics">
@@ -77,7 +78,7 @@ export function HelpPanel({ open, onClose }: Props) {
           <section id="help-loop" className="help-section">
             <h3>The experiment loop</h3>
             <ol>
-              <li>Load the model and inspect its real architecture.</li>
+              <li>Load the model and walk through its real architecture.</li>
               <li>Select a steerable module and press <strong>Set as steering target</strong>.</li>
               <li>Run a baseline to capture the reference output and optional activations.</li>
               <li>Switch to <strong>Steered</strong>, choose a hidden dimension and α, then compare.</li>
@@ -89,10 +90,10 @@ export function HelpPanel({ open, onClose }: Props) {
           <section id="help-activation" className="help-section">
             <h3>Activations</h3>
             <p>
-              An activation is the hidden-state tensor a module produces for every token position. Captured
-              tensors are shaped <code>[tokens, hidden]</code> (for example <code>[17, 2048]</code>). The
-              heatmap shows a sampled grid of token positions against hidden dimensions; the distribution and
-              top dimensions summarize the same measured tensor.
+              An activation is the hidden-state tensor a module produces for every token position. Captures
+              come shaped <code>[tokens, hidden]</code> — <code>[17, 2048]</code>, say. The heatmap samples
+              positions against dimensions; the distribution and top dimensions summarize the same measured
+              tensor.
             </p>
             <p>
               The final generated token has no activation because it is never forwarded through the model.
@@ -188,6 +189,22 @@ export function HelpPanel({ open, onClose }: Props) {
               consistent direction across several prompts, a clean comparison against controls, and a useful
               range of strengths. Separate style effects (length, formatting, tone) from semantic claims, and
               report negative results too.
+            </p>
+          </section>
+
+          <section id="help-flow" className="help-section">
+            <h3>Live flow</h3>
+            <p>
+              <strong>Flow</strong> traces one real generation across every decoder layer. Ribbon width is the
+              measured residual write <code>mean ‖h_l − h_(l−1)‖ / ‖h_(l−1)‖</code>; opacity is the mean cosine
+              between consecutive layer states. The glow and the moving dashes replay one token at a time; the
+              timing is illustrative, the values are measured.
+            </p>
+            <p>
+              Colored strands group hidden dimensions whose z-scored profiles move together on that trace. Click one to
+              inspect its top dimensions and steer the group in σ units. Clusters are descriptive, strand colors
+              are per-layer ranks (not matched across layers), and an unchanged output after steering is a real
+              result, not a failure of the tool.
             </p>
           </section>
 
